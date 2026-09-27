@@ -53,7 +53,10 @@ The Pixel_10 window always opens off-screen (taller than the display) — with i
 ```
 Or click the phone and press **Ctrl+Down** to zoom out (Ctrl+Up zooms in). This has to be done again every time the emulator is relaunched; it doesn't persist.
 
+Set the Google Maps key for this session before running (see section 6) - without it the plot-capture
+map is blank or crashes with "API key not found":
 ```powershell
+$env:MAPS_API_KEY="AIzaSy..."
 cd D:\AgriN\app
 flutter run
 ```
