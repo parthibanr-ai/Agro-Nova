@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from app.providers.base import DailyForecast, ObservedClimate
-from app.services import advice, diagnosis, forecast, knowledge
+from app.services import advice, diagnosis, forecast, geocode, knowledge
 from app.services.enso import EnsoState
 
 EL_NINO = EnsoState(True, "el_nino", "strong", 1.6, "JJA 2026", "steady")
@@ -99,3 +99,88 @@ def test_diagnosis_low_confidence_and_healthy():
     assert diagnosis.assemble({"status": "healthy", "confidence": 0.9})["status"] == "healthy"
     unknown = diagnosis.assemble({"status": "disease", "condition_id": "other", "condition_name": "Weird", "confidence": 0.8})
     assert "neem" in unknown["message"].lower()
+
+
+def test_geocode_falls_back_to_google_when_nominatim_finds_nothing(monkeypatch):
+    monkeypatch.setattr(geocode, "_search_nominatim", lambda q, limit: [])
+    monkeypatch.setattr(geocode, "_search_google", lambda q, limit: [{"display_name": "Achamangalam, Vandavasi, Tamil Nadu, India", "lat": 12.5, "lon": 79.6}])
+    results = geocode.search("achamangalam, vandavasi")
+    assert results[0]["display_name"] == "Achamangalam, Vandavasi, Tamil Nadu, India"
+
+
+def test_geocode_skips_google_when_nominatim_already_has_results(monkeypatch):
+    monkeypatch.setattr(geocode, "_search_nominatim", lambda q, limit: [{"display_name": "Nashik", "lat": 20.0, "lon": 73.8}])
+    monkeypatch.setattr(geocode, "_search_google", lambda q, limit: (_ for _ in ()).throw(AssertionError("should not be called")))
+    assert geocode.search("Nashik")[0]["display_name"] == "Nashik"
+
+
+def test_crop_recommendation_prompt_adds_state_instruction_only_for_india():
+    from app.services.crop_recommendation import build_prompt
+
+    enso = EnsoState(True, "neutral", "none", 0.1, "JJA 2026", "steady")
+    in_prompt = build_prompt(country_code="IN", state="Punjab", area_ha=2.0, current_crop="rice",
+                              soil_values={}, observed=None, enso=enso, today=date(2026, 9, 1))
+    assert "Punjab, India" in in_prompt and "Kharif" in in_prompt
+    br_prompt = build_prompt(country_code="BR", state="Parana", area_ha=2.0, current_crop="soybean",
+                              soil_values={}, observed=None, enso=enso, today=date(2026, 9, 1))
+    assert "refine your choice for that state" not in br_prompt and "Safrinha" in br_prompt
+
+
+def test_crop_recommendation_assemble_resolves_known_crop_and_keeps_unknown():
+    from app.services.crop_recommendation import assemble
+
+    raw = {
+        "target_season": {"local_name": "Kharif", "months": "Jun-Jul"},
+        "recommendations": [
+            {"crop_id": "rice", "crop_name": "whatever the model said", "suitability": "high", "reasoning": "wet soil"},
+            {"crop_id": "not_a_real_crop", "crop_name": "Foxtail millet", "suitability": "medium", "reasoning": "drought tolerant"},
+        ],
+        "basis_summary": "test",
+    }
+    out = assemble(raw)
+    assert out["recommendations"][0]["crop_id"] == "rice" and out["recommendations"][0]["crop_name"] == "Rice"
+    assert out["recommendations"][1]["crop_id"] is None and out["recommendations"][1]["crop_name"] == "Foxtail millet"
+    assert "disclaimer" in out
+
+
+def test_personalized_advice_prompt_is_grounded_and_kind_specific():
+    from app.services.personalized_advice import build_prompt
+
+    enso = EnsoState(True, "el_nino", "moderate", 1.2, "JJA 2026", "steady")
+    common = dict(country_code="IN", state="Punjab", area_ha=2.0, current_crop="wheat",
+                  soil_values={"ph": {"label": "pH", "value": 6.5, "unit": ""}}, observed=None, enso=enso,
+                  has_livestock=True, today=date(2026, 9, 1))
+
+    resilience_prompt = build_prompt("resilience", **common)
+    assert "pH: 6.5" in resilience_prompt and "milch livestock" in resilience_prompt
+    assert "self-reliant" in resilience_prompt or "resilience" in resilience_prompt
+
+    water_prompt = build_prompt("water", **common)
+    assert "water and resource saving" in water_prompt
+
+    market_prompt = build_prompt("market", **common)
+    assert "value addition and market" in market_prompt
+    # every kind must be grounded in the same underlying plot data, not a generic template
+    for p in (resilience_prompt, water_prompt, market_prompt):
+        assert "Punjab, India" in p and "pH: 6.5" in p
+
+
+def test_personalized_advice_assemble_shapes_items_and_adds_disclaimer():
+    from app.services.personalized_advice import assemble
+
+    raw = {"summary": "Focus on moisture retention.",
+           "items": [{"title": "Mulch now", "detail": "Straw mulch over the root zone.", "why": "Soil moisture is below normal."}]}
+    out = assemble(raw)
+    assert out["summary"] == "Focus on moisture retention."
+    assert out["items"][0] == {"title": "Mulch now", "detail": "Straw mulch over the root zone.", "why": "Soil moisture is below normal."}
+    assert "guide" in out["disclaimer"].lower()
+
+
+def test_geocode_google_fallback_without_key_returns_empty(monkeypatch):
+    monkeypatch.setattr(geocode, "_search_nominatim", lambda q, limit: [])
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "")
+    assert geocode._search_google("nowhere", 5) == []
+    get_settings.cache_clear()

@@ -1,6 +1,6 @@
-# AgriN mobile manual (Android)
+# Agro Nova mobile manual (Android)
 
-How to run and use the AgriN Android app. For the web version see [user_manual_web.md](user_manual_web.md). Backend settings are in [env_reference.md](env_reference.md).
+How to run and use the Agro Nova Android app. For the web version see [user_manual_web.md](user_manual_web.md). Backend settings are in [env_reference.md](env_reference.md).
 
 ## 1. What runs where
 
@@ -90,7 +90,7 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 
 | Item | How | Needed for |
 |---|---|---|
-| Google Maps key | In `app/android/app/src/main/AndroidManifest.xml`, inside `<application>`, add `<meta-data android:name="com.google.android.geo.API_KEY" android:value="YOUR_KEY"/>`. Create the key in Google Cloud Console > APIs & Services; enable **Maps SDK for Android**. | The plot-capture map. Without it the map area is blank. |
+| Google Maps key | Already wired in `app/android/app/src/main/AndroidManifest.xml` as a `<meta-data android:name="com.google.android.geo.API_KEY">` inside `<application>`, but it currently reuses the `TRANSLATE_API_KEY` value as a placeholder. Replace it with a dedicated key from Google Cloud Console > APIs & Services with **Maps SDK for Android** enabled, restricted to this app's package name (`in.agrin.agrin`) and SHA-1 fingerprint. | The plot-capture map. Without a working key the map area is blank or crashes with "API key not found". |
 | Firebase | Install the FlutterFire CLI and run `flutterfire configure` in `app/`; this adds `google-services.json`. | Login and push notifications. Without it the app uses `AUTH_MODE=dev` login. |
 | `API_BASE_URL` | `--dart-define=API_BASE_URL=...` on `flutter run` | Pointing at a different backend |
 | Language labels | Hand-written for English, Hindi, Tamil, Portuguese, Russian, Chinese. For the rest set `TRANSLATE_API_KEY` in your shell, run `python tools/translate_arb.py`, then `flutter gen-l10n`. Have a native speaker review. | Fixed screen labels in other Indian languages |
@@ -98,7 +98,7 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 ## 7. Using the app
 
 1. **Language:** tap the translate icon (top right) and pick a language.
-2. **Add a plot:** tap **Add a plot**. Either tap the map at each corner of the field (at least 4, in walking order), or stand at each corner and press the **GPS** button. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid (crossing lines, wrong country) the message says what to fix.
+2. **Add a plot:** tap **Add a plot**. Find the field either by typing a place name in the **Search a place** box above the map (results come from OpenStreetMap, no key needed) or by scrolling/zooming manually. Then mark all four corners: tap the map at each corner (in walking order), stand at each corner and press the **GPS** button, or press the pin-with-pencil button to type a latitude/longitude directly. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid (crossing lines, wrong country) the message says what to fix.
 3. **Soil:** shows modelled public soil data and how to get your soil tested locally. Tap **Add soil sample** to enter values from a government or lab report; press GPS at the sampling spot to record its latitude and longitude.
 4. **Weather & climate outlook:** 10-day forecast, recent rainfall against normal, and advice specific to your crop and growth stage, including El Nino / La Nina effects.
 5. **Diagnose plant:** take a photo of the affected leaf (close, in daylight) or choose one from the gallery. You get the likely deficiency, pest or disease, a natural/organic remedy with preparation steps, and why organic beats chemical. Needs `GEMINI_API_KEY` on the backend.
@@ -124,7 +124,7 @@ The file is `app\build\app\outputs\flutter-apk\app-release.apk`. For the Play St
 | App shows "Could not load" | Backend not running, or wrong address. Test http://localhost:8000/api/v1/health on the PC. On a real phone use your PC's IP, not `10.0.2.2`, and allow port 8000 in the firewall. |
 | App works but every request fails with a network error | Cleartext HTTP is only allowed in debug builds; a release build needs an `https://` backend |
 | Emulator window off-screen or taller than the screen | Run `.\tools\fit_emulator.ps1`, or Ctrl+Down on the phone, or launch with `-scale 0.3` |
-| Emulator shows only the wallpaper | The app is not running yet. Check the `flutter run` terminal, or swipe up on the phone and open **agrin** |
+| Emulator shows only the wallpaper | The app is not running yet. Check the `flutter run` terminal, or swipe up on the phone and open **Agro Nova** |
 | Map is blank | Add the Google Maps key (section 6) |
 | GPS button does nothing on the emulator | Set a location: emulator side panel **...** > Location > Set location |
 | Diagnosis returns 503 | Set `GEMINI_API_KEY` in `backend/.env` and restart the backend |
@@ -134,6 +134,6 @@ The file is `app\build\app\outputs\flutter-apk\app-release.apk`. For the Play St
 ## 10. Tests
 
 ```powershell
-cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 32 tests
+cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 33 tests
 cd D:\AgriN\app;     flutter analyze; flutter test       # app
 ```

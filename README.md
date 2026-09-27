@@ -1,19 +1,20 @@
-# AgriN - Regenerative Agricultural Intelligence
+# Agro Nova - Regenerative Agricultural Intelligence
 
 Web + mobile app (one Flutter codebase) with a FastAPI backend on Google Cloud. For farmers in India, and
 extensible to Brazil, Russia and China (BRIC).
 
 | Requirement | Where it lives |
 |---|---|
-| Four-corner plot capture (map tap or GPS), server validation | `app/lib/screens/plot_capture_screen.dart`, `backend/app/domain/polygon.py` |
+| Four-corner plot capture (map tap, GPS, typed lat/lon, or search a place), server validation | `app/lib/screens/plot_capture_screen.dart`, `backend/app/domain/polygon.py`, `backend/app/services/geocode.py` |
 | Soil data from public sources; prompt to enter existing govt data or how to get it tested; sample lat/lon | `backend/app/services/soil.py`, `app/lib/screens/soil_screen.dart` |
 | Satellite-driven, crop-personalised weather outlook (GEE, extensible) | `backend/app/providers/`, `backend/app/services/forecast.py` |
 | El Nino / La Nina in forecasting | `backend/app/services/enso.py` + country teleconnections in `data/countries.json` |
 | Plant photo -> deficiency/pest/disease -> organic remedy + why organic beats chemical | `backend/app/services/diagnosis.py` (Gemini), `data/remedies.json` |
 | Government schemes/subsidies + push | `data/schemes.json`, `services/notifications.py` (FCM) |
-| Self-resilient farming (cow dung -> compost, milk income, biogas) | `services/advice.py`, `data/resilience.json` |
-| Water and resource saving tips | `data/water_tips.json` |
-| Value addition + market access | `data/value_add.json` |
+| LLM next-sowing-season crop recommendation, using the plot's soil/satellite/ENSO data and the country's local season names (Kharif/Rabi/Zaid, Safra/Safrinha, ...), refined by Indian state | `services/crop_recommendation.py` (Gemini) |
+| Self-resilient farming - generic compost/milk/biogas plan, plus an LLM section hyper-personalised to the plot's own soil/climate/ENSO and current crop | `services/advice.py`, `data/resilience.json`, `services/personalized_advice.py` (Gemini) |
+| Water and resource saving - generic tips, plus an LLM section personalised to the plot's actual rainfall deficit/surplus and soil moisture | `data/water_tips.json`, `services/personalized_advice.py` (Gemini) |
+| Value addition + market access - generic ideas, plus an LLM section personalised to the plot's crop, livestock and coming season | `data/value_add.json`, `services/personalized_advice.py` (Gemini) |
 | 22 Indian languages + Portuguese, Russian, Chinese | `backend/app/core/languages.py`, `app/lib/l10n`, `services/translation.py` |
 | Big data | `pipelines/export_climatology.py` (Earth Engine -> BigQuery) |
 
@@ -25,12 +26,12 @@ Design and roadmap: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 cd backend
 python -m venv .venv; .venv\Scripts\pip install -r requirements.txt
 copy .env.example .env         # AUTH_MODE=dev works without any Google credentials
-.venv\Scripts\python -m pytest # 32 tests
+.venv\Scripts\python -m pytest # 45 tests
 .venv\Scripts\uvicorn app.main:app --reload   # http://localhost:8000/docs (send header X-Dev-User: me)
 ```
 
-Without credentials the API still works: weather comes from Open-Meteo, soil from ISRIC SoilGrids. Add
-credentials to unlock the Google services:
+Without credentials the API still works: weather comes from Open-Meteo, soil from ISRIC SoilGrids, and
+place search from OpenStreetMap Nominatim. Add credentials to unlock the Google services:
 
 - `GEE_CLOUD_PROJECT` (+ `earthengine authenticate` or a service account): satellite NDVI, CHIRPS, ERA5-Land, SMAP.
 - `GEMINI_API_KEY` (or `GEMINI_USE_VERTEX=true`): plant diagnosis. Without it `/diagnosis` returns 503.
@@ -39,17 +40,20 @@ credentials to unlock the Google services:
 
 ## Run the app
 
-Flutter is not installed on the machine this was written on, so **the Flutter code has not been compiled
-or run**. Expect to fix small compile errors on first build.
+Detailed, platform-specific steps (emulator setup, the Pixel_10 window-fit quirk, permissions, APK builds,
+troubleshooting) are in [docs/user_manual_mobile.md](docs/user_manual_mobile.md) and
+[docs/user_manual_web.md](docs/user_manual_web.md). Quick start:
 
 ```powershell
 cd app
-flutter create . --platforms=android,ios,web   # generates platform folders (keeps lib/)
 flutter pub get
 flutter gen-l10n
-flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
+flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000   # web
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000              # Android emulator
 ```
 
-Add a Google Maps API key (Android manifest, iOS AppDelegate, web `index.html`) and run
-`flutterfire configure` for Firebase. Translate the remaining UI languages with
-`python tools/translate_arb.py` (needs `TRANSLATE_API_KEY`).
+A Google Maps key is already wired into `app/android/app/src/main/AndroidManifest.xml`, but it currently
+reuses the Translation key as a placeholder - replace it with a dedicated key that has **Maps SDK for
+Android** enabled and is restricted to this app. iOS (`AppDelegate.swift`) and web (`index.html`) still
+need their own Maps keys added. Run `flutterfire configure` for Firebase. Translate the remaining UI
+languages with `python tools/translate_arb.py` (needs `TRANSLATE_API_KEY`).

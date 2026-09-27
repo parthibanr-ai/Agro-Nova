@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -9,12 +10,14 @@ from app.core.languages import LANGUAGES, get_language
 from app.db import get_db
 from app.domain.polygon import PolygonValidationError, centroid, polygon_area_m2, validate_plot
 from app.models import Plot, SoilSample, User
+from app.providers.base import ObservedClimate
 from app.providers.registry import get_climate_provider
 from app.schemas import FcmToken, LivestockRequest, PlotCreate, ProfileUpdate, SoilSampleCreate
-from app.services import advice, diagnosis, geocode, knowledge, notifications, soil
+from app.services import advice, crop_recommendation, diagnosis, geocode, knowledge, notifications, personalized_advice, soil
 from app.services.enso import get_enso_state
 from app.services.forecast import build_forecast_report
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -192,6 +195,33 @@ def forecast(plot_id: str, days: int = 10, user: User = Depends(current_user), d
     return build_forecast_report(plot=plot, observed=observed, daily=daily, enso=get_enso_state())
 
 
+def _plot_soil_and_climate(plot: Plot) -> tuple[dict, ObservedClimate | None]:
+    """Best-effort soil values + recent observed satellite/climate for one plot, for LLM grounding."""
+    provider = get_climate_provider()
+    try:
+        observed = provider.observed(plot.corner_points, 30)
+    except Exception:  # noqa: BLE001 - keep advice useful even if history is unavailable
+        observed = None
+    samples = sorted(plot.soil_samples, key=lambda s: s.created_at, reverse=True)
+    soil_values = samples[0].values if samples else (soil.fetch_soilgrids(plot.centroid_lat, plot.centroid_lon) or {})
+    return soil_values, observed
+
+
+@router.get("/plots/{plot_id}/crop-recommendation")
+def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    plot = _plot_or_404(db, user, plot_id)
+    soil_values, observed = _plot_soil_and_climate(plot)
+    try:
+        result = crop_recommendation.recommend(
+            country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000, current_crop=plot.crop,
+            soil_values=soil_values, observed=observed, enso=get_enso_state(),
+        )
+    except crop_recommendation.RecommendationUnavailable as e:
+        raise HTTPException(503, str(e)) from e
+    result["plot_id"] = plot.id
+    return result
+
+
 # ------------------------------------------------------------------ diagnosis
 @router.post("/diagnosis")
 async def diagnose_plant(
@@ -226,11 +256,31 @@ def schemes(plot_id: str | None = None, category: str | None = None,
                                    plot.area_m2 / 10_000 if plot else None, category)
 
 
+def _personalized_advice(kind: str, plot: Plot | None, user: User) -> dict | None:
+    """Hyper-personalised LLM advice grounded in this plot's soil/climate/ENSO data, or None without a plot."""
+    if plot is None:
+        return None
+    soil_values, observed = _plot_soil_and_climate(plot)
+    try:
+        return personalized_advice.advise(
+            kind, country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000,
+            current_crop=plot.crop, soil_values=soil_values, observed=observed, enso=get_enso_state(),
+            has_livestock=bool((user.livestock or {}).get("cows")),
+        )
+    except personalized_advice.AdviceUnavailable:
+        return None
+    except Exception:  # noqa: BLE001 - a transient LLM/network failure should drop this section, not the page
+        logger.warning("Personalized %s advice failed for plot %s", kind, plot.id, exc_info=True)
+        return None
+
+
 @router.get("/resilience")
 def resilience(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     cows = (user.livestock or {}).get("cows")
-    return advice.resilience_plan(cows, plot.area_m2 / 4046.856 if plot else None)
+    plan = advice.resilience_plan(cows, plot.area_m2 / 4046.856 if plot else None)
+    plan["personalized"] = _personalized_advice("resilience", plot, user)
+    return plan
 
 
 @router.post("/resilience/livestock-estimate")
@@ -243,13 +293,18 @@ def livestock_estimate(body: LivestockRequest, user: User = Depends(current_user
 @router.get("/water-tips")
 def water_tips(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
-    return {"tips": advice.water_tips(plot.crop if plot else None, get_enso_state())}
+    return {
+        "tips": advice.water_tips(plot.crop if plot else None, get_enso_state()),
+        "personalized": _personalized_advice("water", plot, user),
+    }
 
 
 @router.get("/plots/{plot_id}/market")
 def market(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
-    return advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))
+    out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))
+    out["personalized"] = _personalized_advice("market", plot, user)
+    return out
 
 
 # ------------------------------------------------------------------ notifications (admin/scheduler)

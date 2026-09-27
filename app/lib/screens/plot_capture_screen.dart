@@ -82,6 +82,10 @@ class _PlotCaptureScreenState extends State<PlotCaptureScreen> {
         builder: (dialogContext, setDialogState) => AlertDialog(
           title: Text(t.enterCoordinates),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(t.coordinateEntryHelp(_corners.length), style: Theme.of(dialogContext).textTheme.bodySmall),
+            ),
             TextField(
               controller: latController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),

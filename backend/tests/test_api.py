@@ -110,6 +110,87 @@ def test_diagnosis_without_gemini_key_is_503(client):
     assert client.post("/api/v1/diagnosis", files=files).status_code == 503
 
 
+def test_crop_recommendation_endpoint(client, monkeypatch):
+    from app.services import crop_recommendation
+
+    canned = {
+        "target_season": {"local_name": "Rabi", "months": "Oct-Dec sowing"},
+        "recommendations": [
+            {"crop_id": "wheat", "crop_name": "ignored, comes from knowledge base", "suitability": "high",
+             "reasoning": "Soil moisture and cool forecast favour wheat.", "water_and_soil_fit": "Matches loamy soil.", "risks": ["late-season heat"]},
+            {"crop_id": None, "crop_name": "Local mustard variety", "suitability": "medium",
+             "reasoning": "Short duration, low water need.", "water_and_soil_fit": "Tolerates the sandy patch.", "risks": []},
+        ],
+        "basis_summary": "Based on soil pH, recent rainfall deficit and the upcoming Rabi window.",
+    }
+    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda prompt: canned)
+    pid = _create(client).json()["id"]
+    r = client.get(f"/api/v1/plots/{pid}/crop-recommendation")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["plot_id"] == pid
+    assert body["target_season"]["local_name"] == "Rabi"
+    assert body["recommendations"][0]["crop_id"] == "wheat" and body["recommendations"][0]["crop_name"] == "Wheat"
+    assert body["recommendations"][1]["crop_id"] is None and body["recommendations"][1]["crop_name"] == "Local mustard variety"
+    assert "guide" in body["disclaimer"].lower()
+
+
+def test_crop_recommendation_without_gemini_key_is_503(client):
+    pid = _create(client).json()["id"]
+    assert client.get(f"/api/v1/plots/{pid}/crop-recommendation").status_code == 503
+
+
+def test_personalized_advice_on_resilience_water_and_market(client, monkeypatch):
+    from app.services import personalized_advice
+
+    seen_kinds = []
+
+    def fake_call(prompt):
+        seen_kinds.append(prompt)
+        return {"summary": "Tailored to your plot's soil and rainfall.",
+                "items": [{"title": "Do X", "detail": "Because of your soil pH.", "why": "Matches the pH reading."}]}
+
+    monkeypatch.setattr(personalized_advice, "call_gemini", fake_call)
+    pid = _create(client).json()["id"]
+
+    resilience = client.get(f"/api/v1/resilience?plot_id={pid}").json()
+    assert resilience["personalized"]["summary"] == "Tailored to your plot's soil and rainfall."
+    assert resilience["personalized"]["items"][0]["title"] == "Do X"
+    assert resilience["steps"]  # generic content still present alongside it
+
+    water = client.get(f"/api/v1/water-tips?plot_id={pid}").json()
+    assert water["personalized"]["items"][0]["why"] == "Matches the pH reading."
+    assert water["tips"]
+
+    market = client.get(f"/api/v1/plots/{pid}/market").json()
+    assert market["personalized"]["summary"]
+    assert market["value_addition_ideas"]
+
+    assert len(seen_kinds) == 3  # one Gemini call per section, each grounded in the same plot data
+
+
+def test_personalized_advice_absent_without_plot_or_gemini_key(client):
+    assert client.get("/api/v1/water-tips").json()["personalized"] is None
+    pid = _create(client).json()["id"]
+    assert client.get(f"/api/v1/resilience?plot_id={pid}").json()["personalized"] is None
+
+
+def test_personalized_advice_transient_failure_degrades_gracefully(client, monkeypatch):
+    """A transient Gemini error (e.g. 503 overloaded) must drop the personalized section, not the whole page."""
+    from app.services import personalized_advice
+
+    def boom(prompt):
+        raise RuntimeError("503 UNAVAILABLE: model overloaded")
+
+    monkeypatch.setattr(personalized_advice, "call_gemini", boom)
+    pid = _create(client).json()["id"]
+
+    r = client.get(f"/api/v1/plots/{pid}/market")
+    assert r.status_code == 200, r.text
+    assert r.json()["personalized"] is None
+    assert r.json()["value_addition_ideas"]  # generic content still comes through
+
+
 def test_localization_middleware(client, monkeypatch):
     monkeypatch.setattr("app.services.translation.translate_texts", lambda texts, tgt: {t: f"<{tgt}>{t}" for t in texts})
     body = client.get("/api/v1/schemes?lang=hi").json()

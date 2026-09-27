@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/app_state.dart';
 import '../core/locales.dart';
 import '../l10n/app_localizations.dart';
+import 'crop_recommendation_screen.dart';
 import 'diagnosis_screen.dart';
 import 'forecast_screen.dart';
 import 'info_screens.dart';
@@ -24,6 +25,7 @@ class HomeScreen extends StatelessWidget {
     final tiles = <(IconData, String, Widget Function())>[
       (Icons.cloud_outlined, t.forecast, () => ForecastScreen(plot: plot!)),
       (Icons.terrain, t.soil, () => SoilScreen(plot: plot!)),
+      (Icons.eco_outlined, t.cropRecommendation, () => CropRecommendationScreen(plot: plot!)),
       (Icons.local_florist, t.diagnose, () => DiagnosisScreen(plot: plot)),
       (Icons.account_balance, t.schemes, () => SchemesScreen(plot: plot)),
       (Icons.pets, t.resilience, () => ResilienceScreen(plot: plot)),
@@ -31,7 +33,7 @@ class HomeScreen extends StatelessWidget {
       (Icons.storefront, t.market, () => MarketScreen(plot: plot!)),
     ];
     // Diagnosis, schemes, resilience and water tips work without a plot; the rest need one.
-    const needsPlot = {0, 1, 6};
+    const needsPlot = {0, 1, 2, 7};
 
     return Scaffold(
       appBar: AppBar(

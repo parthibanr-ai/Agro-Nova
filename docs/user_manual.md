@@ -1,4 +1,4 @@
-# AgriN user manual
+# Agro Nova user manual
 
 The manual is split by platform. Pick the one you need.
 

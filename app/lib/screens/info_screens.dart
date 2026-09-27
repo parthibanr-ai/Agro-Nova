@@ -72,6 +72,11 @@ class _ResilienceScreenState extends State<ResilienceScreen> {
       body: AsyncBody<dynamic>(
         load: () => api.get('/resilience', query: {if (widget.plot != null) 'plot_id': widget.plot!.id}),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
+          ...personalizedAdviceCards(context, d['personalized']),
+          if (d['personalized'] == null && widget.plot == null)
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(t.selectPlotForAdvice, style: Theme.of(context).textTheme.bodySmall)),
+          if (d['personalized'] != null) Text(t.generalInformation, style: Theme.of(context).textTheme.titleMedium),
+          if (d['personalized'] != null) const SizedBox(height: 8),
           for (final s in d['steps']) InfoCard(title: '${s['order']}. ${s['title']}', body: s['detail']),
           if (d['suggested_cows_for_manure_self_sufficiency'] != null)
             InfoCard(title: t.numberOfCows, body: '~${d['suggested_cows_for_manure_self_sufficiency']} cows can supply the manure for your plot.'),
@@ -112,6 +117,11 @@ class WaterTipsScreen extends StatelessWidget {
       body: AsyncBody<dynamic>(
         load: () => api.get('/water-tips', query: {if (plot != null) 'plot_id': plot!.id}),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
+          ...personalizedAdviceCards(context, d['personalized']),
+          if (d['personalized'] == null && plot == null)
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(t.selectPlotForAdvice, style: Theme.of(context).textTheme.bodySmall)),
+          if (d['personalized'] != null) Text(t.generalInformation, style: Theme.of(context).textTheme.titleMedium),
+          if (d['personalized'] != null) const SizedBox(height: 8),
           for (final tip in d['tips']) InfoCard(title: tip['title'], body: tip['detail']),
         ]),
       ),
@@ -132,6 +142,9 @@ class MarketScreen extends StatelessWidget {
       body: AsyncBody<dynamic>(
         load: () => api.get('/plots/${plot.id}/market'),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
+          ...personalizedAdviceCards(context, d['personalized']),
+          if (d['personalized'] != null) Text(t.generalInformation, style: Theme.of(context).textTheme.titleMedium),
+          if (d['personalized'] != null) const SizedBox(height: 8),
           InfoCard(title: plot.crop, children: bullets(d['value_addition_ideas'])),
           InfoCard(title: t.market, children: [...bullets(d['market_channels']), ...bullets(d['principles'])]),
           if (d['livestock_value_addition'] != null) ...[

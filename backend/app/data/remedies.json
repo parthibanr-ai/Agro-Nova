@@ -171,6 +171,30 @@
         {"name": "Resistant / early varieties", "prepare": "-", "apply": "Choose local rust-resistant seed from KVK.", "timing": "Next sowing"},
         {"name": "Garlic/neem extract spray", "prepare": "5% neem leaf or garlic extract.", "apply": "Spray in the evening.", "timing": "Weekly"}],
       "preventive": ["Remove volunteer plants/alternate hosts", "Balanced nutrition (avoid excess N)"],
-      "chemical_comparison": "Triazole fungicides are effective but repeated use erodes efficacy and harms beneficial fungi."}
+      "chemical_comparison": "Triazole fungicides are effective but repeated use erodes efficacy and harms beneficial fungi."},
+    "dis_rice_blast": {"kind": "disease", "name": "Rice blast",
+      "symptoms": ["Diamond/spindle-shaped spots on leaves with grey-white centre and brown border", "Black, brittle nodes that snap the stem (node blast)", "Blackened panicle base with empty or chalky grains (neck blast)"],
+      "organic_remedies": [
+        {"name": "Trichoderma viride / Pseudomonas fluorescens seed and soil treatment", "prepare": "Certified culture from KVK/biocontrol lab.", "apply": "Seed treatment 10 g/kg seed; soil application 2.5 kg/acre mixed with compost.", "timing": "At sowing/nursery stage, repeat as foliar spray from tillering"},
+        {"name": "Rice husk ash / silicon-rich amendment", "prepare": "Collect ash from burnt rice husk (a farm by-product).", "apply": "Broadcast 200-400 kg/acre into the nursery or main field.", "timing": "Before transplanting"},
+        {"name": "Sanitation and split nitrogen", "prepare": "-", "apply": "Remove and destroy infected stubble/straw; split urea/compost N into 3-4 doses instead of one heavy dose.", "timing": "Throughout the season"}],
+      "preventive": ["Grow blast-tolerant local varieties", "Avoid dense planting and excess shade", "Avoid a single heavy nitrogen dose; split it", "Keep a thin standing water layer rather than letting the field dry and re-flood"],
+      "chemical_comparison": "Tricyclazole and other systemic fungicides need precise, repeated timing around flowering and have shown resistance in some blast populations; silicon and biocontrol build season-long resistance instead."},
+    "dis_bacterial_leaf_blight": {"kind": "disease", "name": "Bacterial leaf blight (rice)",
+      "symptoms": ["Water-soaked yellow streaks starting at the leaf tip or margin, turning grey-white", "Wavy-edged lesions running along veins", "Seedlings wilt and die ('kresek') in severe early infection"],
+      "organic_remedies": [
+        {"name": "Pseudomonas fluorescens", "prepare": "Certified culture.", "apply": "Seed treatment 10 g/kg seed, plus foliar spray 10 g/L from tillering.", "timing": "At sowing, then every 10-14 days"},
+        {"name": "Cow-urine and neem leaf extract spray", "prepare": "Ferment 1 L cow urine with 1 kg crushed neem leaves in 10 L water for 3 days, filter.", "apply": "Dilute 1:5 and spray on foliage.", "timing": "Every 7-10 days, starting at first streaks"},
+        {"name": "Drain the field and avoid injury at transplanting", "prepare": "-", "apply": "Briefly drain standing water; avoid clipping seedling leaf tips during transplanting, which lets bacteria enter.", "timing": "At transplanting and if the field is waterlogged"}],
+      "preventive": ["Use certified, hot-water-treated seed (the bacterium is seed-borne)", "Avoid excess nitrogen, which makes leaves more susceptible", "Grow tolerant varieties", "Keep field bunds and channels weed-free (alternate hosts)"],
+      "chemical_comparison": "Copper bactericides and antibiotics (e.g. streptocycline) give partial control at best, need exact early timing, and copper residue builds up in paddy soil over repeated seasons."},
+    "dis_brown_spot": {"kind": "disease", "name": "Brown spot (rice)",
+      "symptoms": ["Small circular to oval brown spots with a yellow halo, grey-white centre when older", "Spots on leaves, leaf sheath and glumes; discoloured, spotted grain", "Worse on nutrient-poor or unflooded, stressed soil"],
+      "organic_remedies": [
+        {"name": "Trichoderma-treated seed", "prepare": "Certified Trichoderma viride/harzianum culture.", "apply": "Seed treatment 4 g/kg seed before sowing (brown spot is seed-borne).", "timing": "At sowing"},
+        {"name": "Correct soil fertility with compost, ash and zinc", "prepare": "Well-decomposed compost/FYM; wood ash for potassium.", "apply": "2-4 t/acre compost plus 50-100 kg/acre wood ash.", "timing": "Before transplanting; brown spot is far worse in poor soil"},
+        {"name": "Neem seed kernel extract 5% foliar spray", "prepare": "As NSKE (see whitefly entry).", "apply": "Spray on foliage.", "timing": "Every 10 days from first spots"}],
+      "preventive": ["Use certified disease-free seed", "Keep the field adequately flooded/irrigated, not stressed", "Balanced NPK plus potassium and zinc, not nitrogen alone", "Remove and destroy infected straw after harvest"],
+      "chemical_comparison": "Fungicide sprays treat the symptom; brown spot mainly reflects poor soil fertility (it worsened the 1943 Bengal famine on exhausted soils), so building soil health gives longer-lasting control."}
   }
 }

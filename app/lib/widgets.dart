@@ -33,7 +33,7 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
                 const SizedBox(height: 8),
                 Text(t.loadFailed, style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 12),
-                FilledButton(onPressed: () => setState(() => _f = widget.load()), child: Text(t.retry)),
+                FilledButton(onPressed: () => setState(() { _f = widget.load(); }), child: Text(t.retry)),
               ]),
             ),
           );
@@ -84,3 +84,30 @@ class InfoCard extends StatelessWidget {
 }
 
 List<Widget> bullets(Iterable<dynamic> items) => [for (final i in items) Padding(padding: const EdgeInsets.only(top: 4), child: Text('•  $i'))];
+
+/// The hyper-personalised LLM advice block (`personalized` field: {summary, items: [{title, detail, why}]})
+/// shared by the resilience, water-tips and market screens. Renders nothing if [personalized] is null,
+/// e.g. no plot is selected yet or the advice service is unavailable.
+List<Widget> personalizedAdviceCards(BuildContext context, dynamic personalized) {
+  if (personalized == null) return const [];
+  final t = AppLocalizations.of(context);
+  final items = (personalized['items'] as List?) ?? const [];
+  return [
+    InfoCard(
+      title: t.personalizedForYourPlot,
+      body: personalized['summary'] as String?,
+      children: [
+        for (final i in items) ...[
+          const SizedBox(height: 10),
+          Text(i['title'] ?? '', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(i['detail'] ?? ''),
+          if ((i['why'] as String?)?.isNotEmpty == true) ...[
+            const SizedBox(height: 4),
+            Text('${t.why}: ${i['why']}', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic)),
+          ],
+        ],
+      ],
+    ),
+  ];
+}

@@ -1,6 +1,6 @@
-# AgriN web manual
+# Agro Nova web manual
 
-How to run and use the AgriN web app (runs in Chrome or any modern browser). For Android see [user_manual_mobile.md](user_manual_mobile.md). Backend settings are in [env_reference.md](env_reference.md).
+How to run and use the Agro Nova web app (runs in Chrome or any modern browser). For Android see [user_manual_mobile.md](user_manual_mobile.md). Backend settings are in [env_reference.md](env_reference.md).
 
 ## 1. What runs where
 
@@ -67,7 +67,7 @@ While running, **r** hot-reloads, **R** restarts, **q** quits. To try it on a ph
 ## 6. Using the app
 
 1. **Language:** tap the translate icon and pick a language.
-2. **Add a plot:** tap **Add a plot**. Click the map at each corner of the field (at least 4, in walking order). Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid the message says what to fix.
+2. **Add a plot:** tap **Add a plot**. Find the field by typing a place name in the **Search a place** box above the map (no key needed, uses OpenStreetMap) or by scrolling/zooming manually. Mark all four corners: click the map at each corner (in walking order), or use the pin-with-pencil button to type a latitude/longitude directly. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid the message says what to fix.
 3. **Soil:** modelled public soil data plus how to get your soil tested locally. **Add soil sample** enters values from a government or lab report with the sample's latitude and longitude.
 4. **Weather & climate outlook:** 10-day forecast, recent rainfall against normal, and crop-specific advice including El Nino / La Nina effects.
 5. **Diagnose plant:** upload a leaf photo to get the likely deficiency, pest or disease, an organic remedy with preparation steps, and why organic beats chemical. Needs `GEMINI_API_KEY`.
@@ -105,6 +105,6 @@ The output is `app\build\web` (static files). Host it anywhere that serves stati
 ## 9. Tests
 
 ```powershell
-cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 32 tests
+cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 33 tests
 cd D:\AgriN\app;     flutter analyze; flutter test       # app
 ```

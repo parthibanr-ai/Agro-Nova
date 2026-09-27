@@ -30,6 +30,11 @@
       "Sample 15-20 cm deep from 8-10 spots across the plot (zig-zag), mix, and submit ~500 g. Record the GPS of each sampling spot in AgriN.",
       "Village-level entrepreneurs and Agri-clinics under the state agriculture department can also run mini soil-test kits."
     ],
+    "sowing_seasons": [
+      {"local_name": "Kharif", "months": "Sown Jun-Jul (with the monsoon onset), harvested Sep-Nov", "description": "Monsoon/rain-fed season. Typical crops: rice, maize, cotton, soybean, groundnut, pigeon pea."},
+      {"local_name": "Rabi", "months": "Sown Oct-Dec (after the monsoon retreats), harvested Mar-Apr", "description": "Winter season, mostly irrigation-dependent. Typical crops: wheat, chickpea, mustard."},
+      {"local_name": "Zaid", "months": "Sown Mar-Jun, short duration", "description": "Summer season between rabi harvest and kharif sowing, needs irrigation. Typical crops: moong, vegetables, fodder."}
+    ],
     "enso_impact": {
       "el_nino": {
         "summary": "El Nino years tend to weaken and delay the Southwest Monsoon (June-September), raising the odds of below-normal rainfall, longer dry spells and heat stress, especially in central and north-west India.",
@@ -69,6 +74,10 @@
       "Collect 15-20 sub-samples at 0-20 cm depth per homogeneous area, mix and submit ~300-500 g.",
       "Record the GPS of each collection point in AgriN and upload the lab report values."
     ],
+    "sowing_seasons": [
+      {"local_name": "Safra (1a safra)", "months": "Sown Sep-Dec, harvested Jan-Apr", "description": "Main summer crop season. Typical crops: soybean, first-crop maize, cotton, rice."},
+      {"local_name": "Safrinha (2a safra)", "months": "Sown Jan-Mar, right after the soy harvest", "description": "'Little harvest' second-crop season, mainly in Centre-West/Parana. Typical crop: second-crop maize; more exposed to frost/dry-spell risk than the 1a safra."}
+    ],
     "enso_impact": {
       "el_nino": {
         "summary": "El Nino tends to bring heavier rain and flood risk to southern Brazil and drought/heat to the north and north-east (including the Amazon and Matopiba).",
@@ -107,6 +116,10 @@
       "Contact your regional branch of Rosselkhozcentr (agrochemical service) for a soil agrochemical survey.",
       "Take 20 mixed sub-samples from 0-20 cm per field section and record the GPS of each point in AgriN."
     ],
+    "sowing_seasons": [
+      {"local_name": "Яровые (Yarovye, spring crops)", "months": "Sown Apr-May, harvested Aug-Sep the same year", "description": "Spring-sown crops. Typical crops: spring wheat, barley, oats, sunflower."},
+      {"local_name": "Озимые (Ozimye, winter crops)", "months": "Sown Aug-Sep, overwinters under snow, harvested Jul-Aug the following year", "description": "Autumn-sown crops that overwinter. Typical crops: winter wheat, winter rye, winter barley. Needs reliable snow cover to survive frost."}
+    ],
     "enso_impact": {
       "el_nino": {
         "summary": "ENSO influence on Russian agriculture is weaker and indirect; El Nino winters are often milder in parts of the country, with uncertain effects on spring moisture.",
@@ -143,6 +156,11 @@
     "soil_testing_guidance": [
       "Ask your county agricultural technology extension centre for soil testing and formula-fertilization service (测土配方施肥).",
       "Take 10-15 sub-samples at 0-20 cm per field, mix, submit ~500 g and record GPS of each point in AgriN."
+    ],
+    "sowing_seasons": [
+      {"local_name": "春播 (Chunbo, spring sowing)", "months": "Mar-May", "description": "Spring-sown crops. Typical crops: spring maize, spring wheat (north), early rice (south)."},
+      {"local_name": "夏播 (Xiabo, summer sowing)", "months": "Jun, right after the winter-wheat harvest", "description": "Second sowing for double/multiple cropping. Typical crops: summer maize, soybean, late rice."},
+      {"local_name": "秋播 (Qiubo, autumn sowing)", "months": "Sep-Oct", "description": "Autumn sowing of overwintering crops. Typical crops: winter wheat, rapeseed."}
     ],
     "enso_impact": {
       "el_nino": {
