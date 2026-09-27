@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Google Maps SDK key, injected at build time so it never lives in source control.
+        // Set the MAPS_API_KEY environment variable before running `flutter run`/`flutter build`.
+        manifestPlaceholders["mapsApiKey"] = System.getenv("MAPS_API_KEY") ?: ""
     }
 
     buildTypes {
