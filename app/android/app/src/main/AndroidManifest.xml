@@ -34,6 +34,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Google Maps SDK for Android: get a key at
+             https://developers.google.com/maps/documentation/android-sdk/get-api-key
+             and enable "Maps SDK for Android" on it. Without a real key, any screen
+             showing a map (plot capture) crashes with "API key not found". -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyAo5FSrewtyBoSHpoXQg4PNuO2gDvCxgC4" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
