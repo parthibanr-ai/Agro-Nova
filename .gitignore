@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+secrets/
+*.db
+.pytest_cache/
+app/build/
+app/.dart_tool/
+app/lib/l10n/app_localizations*.dart

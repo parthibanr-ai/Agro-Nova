@@ -1,0 +1,19 @@
+{
+  "tips": [
+    {"id": "mulch", "title": "Mulch the soil", "detail": "Cover soil with 5-8 cm of straw, leaves or crop residue. It cuts evaporation by up to 25-50% and keeps roots cooler.", "when": ["always", "dry", "hot"], "crops": []},
+    {"id": "drip", "title": "Switch to drip or sprinkler", "detail": "Drip delivers water at the root and can save 30-50% water compared to flood irrigation while lifting yield. Check PMKSY (India) or your country's micro-irrigation subsidy.", "when": ["always", "dry"], "crops": ["sugarcane", "cotton", "tomato", "potato", "coffee", "maize"]},
+    {"id": "timing", "title": "Irrigate early morning or evening", "detail": "Less water is lost to evaporation and wind drift.", "when": ["always", "hot"], "crops": []},
+    {"id": "critical_stage", "title": "Save water for critical stages", "detail": "Give priority to flowering and grain/fruit filling; a lean irrigation earlier in the season is safer than missing these stages.", "when": ["dry"], "crops": []},
+    {"id": "sri", "title": "Try SRI / alternate wetting and drying for rice", "detail": "Keep fields moist rather than continuously flooded; alternate wetting and drying saves up to 25-30% water and cuts methane.", "when": ["always", "dry"], "crops": ["rice"]},
+    {"id": "farm_pond", "title": "Build a farm pond or check dam", "detail": "Capture monsoon runoff for protective irrigation and recharge; many states subsidise farm ponds.", "when": ["always", "wet"], "crops": []},
+    {"id": "rain_recharge", "title": "Recharge groundwater in the rainy season", "detail": "Direct excess runoff into recharge pits or trenches; it raises borewell levels for the dry months.", "when": ["wet"], "crops": []},
+    {"id": "organic_matter", "title": "Add compost to hold more water", "detail": "Each 1% rise in soil organic matter helps the soil hold roughly 20,000+ litres more water per hectare.", "when": ["always"], "crops": []},
+    {"id": "contour", "title": "Contour bunds, ridges and furrows", "detail": "Slow runoff and let water soak in on sloping land; use raised beds and drains where waterlogging is a risk.", "when": ["always", "wet"], "crops": []},
+    {"id": "drought_varieties", "title": "Choose drought-tolerant crops or varieties", "detail": "Millets, pulses and short-duration varieties need 40-70% less water than rice or sugarcane and cope with El Nino dry spells.", "when": ["dry", "el_nino"], "crops": []},
+    {"id": "scheduling", "title": "Irrigate by soil moisture, not by calendar", "detail": "Push a finger 5-10 cm into soil: irrigate only if it feels dry. AgriN's soil-moisture and rainfall forecast will flag when to skip an irrigation.", "when": ["always"], "crops": []},
+    {"id": "weeds", "title": "Keep weeds down", "detail": "Weeds compete for water; timely weeding or mulching saves irrigation.", "when": ["always"], "crops": []},
+    {"id": "solar", "title": "Use solar pumps and reuse water", "detail": "Solar pumps (PM-KUSUM in India) cut diesel cost; reuse treated household or dairy wash water for fodder or trees.", "when": ["always"], "crops": []},
+    {"id": "trees", "title": "Plant trees on bunds", "detail": "Agroforestry lines reduce wind speed and evaporation, provide fodder, fruit and long-term income.", "when": ["always", "hot"], "crops": []},
+    {"id": "natural_resources", "title": "Protect soil, biodiversity and energy", "detail": "Reduce tillage, keep the soil covered, retain hedgerows for beneficial insects, use biogas from dung for cooking fuel and slurry as manure.", "when": ["always"], "crops": []}
+  ]
+}

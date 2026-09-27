@@ -1,0 +1,5 @@
+package `in`.agrin.agrin
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()

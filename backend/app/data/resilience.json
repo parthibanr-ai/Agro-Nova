@@ -1,0 +1,29 @@
+{
+  "assumptions_note": "All figures are indicative national averages used to start a conversation. Actual milk yield, prices and feed costs vary by breed, region and season; edit the inputs in AgriN to match your farm.",
+  "defaults": {
+    "milk_l_per_cow_per_day": 8.0,
+    "milk_price_per_l": 40.0,
+    "feed_cost_per_cow_per_day": 150.0,
+    "dung_kg_per_cow_per_day": 10.0,
+    "compost_yield_fraction": 0.4,
+    "manure_t_per_acre_per_year": 4.0,
+    "biogas_m3_per_kg_dung": 0.04,
+    "lactation_days_per_year": 300
+  },
+  "steps": [
+    {"order": 1, "title": "Start with 1-2 cows (or buffaloes/goats) on your own fodder", "detail": "Grow green fodder (Napier, sorghum, lucerne, azolla) on 10-15% of the land so feed cost stays low. Prefer local, hardy breeds; register with the local dairy cooperative for a guaranteed milk buyer."},
+    {"order": 2, "title": "Set up a compost pit or vermicompost bed", "detail": "Heap dung, urine-soaked bedding and crop residue in a shaded pit or brick tank; it turns into manure in 60-90 days (vermicompost in about 45)."},
+    {"order": 3, "title": "Add a small biogas plant", "detail": "Dung yields cooking gas (saving LPG) and nutrient-rich slurry manure. 2-3 cows feed a 2 m3 household plant."},
+    {"order": 4, "title": "Make Jeevamrut and Panchagavya from dung and urine", "detail": "These fermented cow-based inputs feed soil biology and replace part of the chemical fertiliser bill."},
+    {"order": 5, "title": "Add milk value-addition", "detail": "Convert surplus milk to curd, ghee or paneer for 2-3x the price of raw milk; join a dairy cooperative or women's SHG."},
+    {"order": 6, "title": "Diversify: poultry, goats, bees, fish, agroforestry", "detail": "A mix of enterprises spreads risk when one crop or market fails. Bees lift pollination and honey income; trees on bunds give fodder, fruit and timber."},
+    {"order": 7, "title": "Keep records and use insurance", "detail": "Record milk, feed, and manure. Insure crops and livestock (PMFBY and livestock insurance in India) and keep a small emergency fund."}
+  ],
+  "enterprises": [
+    {"id": "dairy", "name": "Dairy (cow/buffalo)", "returns": "Daily milk income + manure + biogas", "start_cost_note": "Depends on breed; loans via KCC and Rashtriya Gokul Mission support in India."},
+    {"id": "vermicompost", "name": "Vermicompost", "returns": "Sell surplus manure and vermiwash", "start_cost_note": "Low cost: pits or beds under shade."},
+    {"id": "poultry", "name": "Backyard poultry", "returns": "Eggs and meat, manure", "start_cost_note": "Very low; local breeds are hardy."},
+    {"id": "apiculture", "name": "Beekeeping", "returns": "Honey, wax, higher yields via pollination", "start_cost_note": "Low; KVK training available."},
+    {"id": "agroforestry", "name": "Agroforestry / fodder trees", "returns": "Fodder, fruit, timber, shade, wind-break", "start_cost_note": "Low; long-term payback."}
+  ]
+}

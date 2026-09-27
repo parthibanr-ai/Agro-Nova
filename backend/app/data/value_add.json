@@ -1,0 +1,35 @@
+{
+  "generic": {
+    "principles": [
+      "Sell graded and cleaned produce: grading and packing alone can raise the price by 10-20%.",
+      "Join a Farmer Producer Organisation (FPO) or cooperative to aggregate volume, share transport and negotiate better prices.",
+      "Store instead of distress-selling: use warehouse receipts / cold storage and sell when prices recover.",
+      "Sell direct: farmers' markets, community-supported agriculture, online marketplaces (ONDC in India) and institutional buyers."
+    ],
+    "market_channels": {
+      "IN": ["eNAM (enam.gov.in) for online mandi trading", "Agmarknet for daily mandi prices", "ONDC seller apps for direct-to-consumer", "FPO / FPC aggregation", "Warehouse receipts (WDRA-registered warehouses)"],
+      "BR": ["CEASA wholesale markets", "Cooperatives (COOP)", "PAA / PNAE public purchase", "Local feiras (farmers' markets)"],
+      "RU": ["Regional agricultural cooperatives", "Processor contracts", "Regional farmers' markets and online marketplaces"],
+      "CN": ["Agricultural cooperatives", "E-commerce and live-stream marketing platforms", "County wholesale markets", "Contract farming with processors"]
+    }
+  },
+  "crops": {
+    "rice": ["Aromatic/organic grade rice with your own brand", "Poha/puffed rice, rice flour, rice bran oil", "Sell paddy straw for mushroom beds, biochar or compost"],
+    "wheat": ["Stone-ground atta and dalia", "Sooji/rava, bakery flour via mini-mill", "Straw as fodder/bedding"],
+    "maize": ["Cleaned/dried maize for poultry-feed buyers", "Corn flour, popcorn, sweet-corn packs", "Silage for dairy"],
+    "sugarcane": ["Jaggery (gur) and jaggery powder", "Organic sugar/khandsari", "Fresh juice with cold-chain packs", "Press-mud compost"],
+    "cotton": ["Ginned lint via local ginning cooperative", "Cottonseed oil/cake for cattle feed", "Organic/BCI cotton premium"],
+    "soybean": ["Soy milk, tofu, soy flour", "Cold-pressed soy oil", "Soy cake as protein feed"],
+    "groundnut": ["Cold-pressed groundnut oil", "Peanut butter, chikki, roasted packs", "Groundnut cake as cattle feed"],
+    "millet": ["Millet flour, flakes and ready-mixes", "Millet cookies/pasta with local SHG", "Positioned as health food; Shree Anna (India) promotion"],
+    "chickpea": ["Split dal (mini dal mill)", "Besan (gram flour)", "Roasted chana snacks"],
+    "tomato": ["Puree, ketchup/sauce", "Sun-dried tomato", "Graded fresh packs for retail chains"],
+    "potato": ["Chips/french fries via processor contract", "Cold storage and sell off-season", "Potato flakes/starch"],
+    "coffee": ["Specialty/single-origin, shade-grown lots", "Roasted and ground packs, direct export via cooperative", "Geographical-indication branding"]
+  },
+  "livestock": {
+    "milk": ["Curd, buttermilk, ghee", "Paneer and khoa", "Sell via dairy cooperative for assured pricing"],
+    "dung": ["Compost / vermicompost bags", "Biogas + slurry", "Dung cakes, dhoop/organic products"]
+  },
+  "linked_schemes": ["in_aif", "in_pmfme", "in_enam"]
+}
