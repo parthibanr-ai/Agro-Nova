@@ -45,6 +45,15 @@ Check http://localhost:8000/api/v1/health in a browser. `--host 0.0.0.0` lets th
 
 ```powershell
 flutter emulators --launch Pixel_10
+```
+
+The Pixel_10 window always opens off-screen (taller than the display) — with it running, run this from `D:\AgriN` to move it into view and zoom out so the whole phone fits:
+```powershell
+.\tools\fit_emulator.ps1
+```
+Or click the phone and press **Ctrl+Down** to zoom out (Ctrl+Up zooms in). This has to be done again every time the emulator is relaunched; it doesn't persist.
+
+```powershell
 cd D:\AgriN\app
 flutter run
 ```
@@ -52,11 +61,6 @@ flutter run
 Pick `emulator-5554` if asked. The first build takes 5 to 10 minutes (Gradle downloads dependencies once); later runs take about a minute. While running, **r** hot-reloads, **R** restarts, **q** quits.
 
 The emulator reaches your PC at `http://10.0.2.2:8000`, which the app uses by default.
-
-**If the emulator is off-screen or taller than your screen:** with it running, run `.\tools\fit_emulator.ps1` from `D:\AgriN`. It moves the window into view and zooms out so the whole phone fits. Or click the phone and press **Ctrl+Down** to zoom out (Ctrl+Up zooms in), or launch it pre-scaled:
-```powershell
-& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd Pixel_10 -scale 0.3
-```
 
 ## 4. Run on a real phone
 
