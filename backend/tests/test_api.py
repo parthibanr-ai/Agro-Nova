@@ -22,6 +22,15 @@ def test_meta(client):
     assert {c["code"] for c in client.get("/api/v1/meta/countries").json()["countries"]} == {"IN", "BR", "RU", "CN"}
 
 
+def test_geocode(client, monkeypatch):
+    from app.services import geocode
+
+    monkeypatch.setattr(geocode, "search", lambda q, limit=5: [{"display_name": "Nashik, Maharashtra, India", "lat": 19.99, "lon": 73.79}])
+    r = client.get("/api/v1/geocode", params={"q": "Nashik"})
+    assert r.status_code == 200
+    assert r.json()["results"][0]["display_name"] == "Nashik, Maharashtra, India"
+
+
 def test_plot_capture_four_corners(client):
     r = _create(client)
     assert r.status_code == 201, r.text

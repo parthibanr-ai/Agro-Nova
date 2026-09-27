@@ -11,7 +11,7 @@ from app.domain.polygon import PolygonValidationError, centroid, polygon_area_m2
 from app.models import Plot, SoilSample, User
 from app.providers.registry import get_climate_provider
 from app.schemas import FcmToken, LivestockRequest, PlotCreate, ProfileUpdate, SoilSampleCreate
-from app.services import advice, diagnosis, knowledge, notifications, soil
+from app.services import advice, diagnosis, geocode, knowledge, notifications, soil
 from app.services.enso import get_enso_state
 from app.services.forecast import build_forecast_report
 
@@ -60,6 +60,11 @@ def countries() -> dict:
 @router.get("/meta/crops")
 def crops() -> dict:
     return {"crops": [{"id": cid, "name": c["name"]} for cid, c in knowledge.crops().items()]}
+
+
+@router.get("/geocode")
+def geocode_search(q: str) -> dict:
+    return {"results": geocode.search(q)}
 
 
 # ------------------------------------------------------------------ profile
