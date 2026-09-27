@@ -1,11 +1,11 @@
 {
-    "name": "agrin",
-    "short_name": "agrin",
+    "name": "Agro Nova",
+    "short_name": "Agro Nova",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Agro Nova - Regenerative Agricultural Intelligence",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

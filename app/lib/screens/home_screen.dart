@@ -64,10 +64,14 @@ class HomeScreen extends StatelessWidget {
               else
                 DropdownButtonFormField<Plot>(
                   initialValue: plot,
+                  isExpanded: true,
                   decoration: InputDecoration(labelText: t.myPlots, border: const OutlineInputBorder()),
                   items: [
                     for (final p in s.plots)
-                      DropdownMenuItem(value: p, child: Text('${p.name} - ${p.crop} (${p.areaAcres} ac)')),
+                      DropdownMenuItem(
+                        value: p,
+                        child: Text('${p.name} - ${p.crop} (${p.areaAcres} ac)', overflow: TextOverflow.ellipsis),
+                      ),
                   ],
                   onChanged: (p) => p == null ? null : context.read<AppState>().select(p),
                 ),
