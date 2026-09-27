@@ -58,9 +58,15 @@ The first forecast with Earth Engine active can take 10 to 30 seconds. If Earth 
 
 | Setting | Meaning |
 |---|---|
-| `GEMINI_API_KEY` | Create at https://aistudio.google.com/apikey. Without it `/diagnosis` returns 503; the rest of the app works. |
+| `GEMINI_API_KEY` | Create at https://aistudio.google.com/apikey. Without it, `/diagnosis`, `/plots/{id}/crop-recommendation`, and the personalized sections of `/resilience`, `/water-tips` and `/plots/{id}/market` are unavailable; the rest of the app works. The free tier caps at 20 requests/day for `gemini-2.5-flash` - enable billing on the project to lift it. |
 | `GEMINI_MODEL` | Model to use (default `gemini-2.5-flash`). |
 | `GEMINI_USE_VERTEX`, `GCP_LOCATION` | Use Gemini through Vertex AI in your Google Cloud project instead of an API key. |
+
+## Google Geocoding (place search fallback)
+
+| Setting | Meaning |
+|---|---|
+| `GOOGLE_MAPS_API_KEY` | Fallback for the plot-capture map's "search a place" box when OpenStreetMap Nominatim has no match (common for small Indian villages). Create in Cloud Console with **Geocoding API** enabled and added to this key's API restrictions. Without it, search still works via Nominatim alone, just with weaker coverage of small places. This is a separate, server-side key from the Android app's `MAPS_API_KEY` build-time environment variable (see the mobile manual), which renders the map itself. |
 
 ## Cloud Translation (advice in the farmer's language)
 

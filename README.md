@@ -52,8 +52,8 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000   # web
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000              # Android emulator
 ```
 
-A Google Maps key is already wired into `app/android/app/src/main/AndroidManifest.xml`, but it currently
-reuses the Translation key as a placeholder - replace it with a dedicated key that has **Maps SDK for
-Android** enabled and is restricted to this app. iOS (`AppDelegate.swift`) and web (`index.html`) still
-need their own Maps keys added. Run `flutterfire configure` for Firebase. Translate the remaining UI
-languages with `python tools/translate_arb.py` (needs `TRANSLATE_API_KEY`).
+The Android Google Maps key is never hardcoded: set the `MAPS_API_KEY` environment variable (a key with
+**Maps SDK for Android** enabled, restricted to this app) before running `flutter run`/`flutter build` -
+`android/app/build.gradle.kts` injects it into the manifest at build time. iOS (`AppDelegate.swift`) and
+web (`index.html`) still need their own Maps keys added. Run `flutterfire configure` for Firebase.
+Translate the remaining UI languages with `python tools/translate_arb.py` (needs `TRANSLATE_API_KEY`).
