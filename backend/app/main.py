@@ -6,12 +6,13 @@ from fastapi import FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin_routes import router as admin_router
 from app.api.job_routes import router as job_router
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.gee_auth import init_earth_engine
 from app.db import init_db
-from app.services import jobs
+from app.services import jobs, tasks
 from app.services.translation import localize_payload
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,7 @@ async def lifespan(_: FastAPI):
     init_earth_engine()
     yield
     jobs.shutdown()  # let running jobs finish and drop queued ones on a clean stop
+    tasks.shutdown()
 
 
 app = FastAPI(title="AgriN API", version="0.1.0", lifespan=lifespan)
@@ -62,3 +64,4 @@ async def localize_json(request: Request, call_next):
 
 app.include_router(router)
 app.include_router(job_router)
+app.include_router(admin_router)

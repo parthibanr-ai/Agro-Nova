@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     job_fast_wait_s: float = 2.0  # how long the request waits for a quick answer before replying "accepted"
     job_ttl_s: int = 3600  # finished jobs are kept this long for polling, then purged
     job_lease_s: int = 180  # a job unfinished after this long is presumed lost (instance died) and marked failed
+    task_workers: int = 4  # background task threads per instance (push-notification fan-out)
+    # A farmer hears about each scheme once, and at most this many new ones per day, so the daily push stays worth
+    # opening instead of being muted. (A backlog of 11 matching schemes is spread over about six days.)
+    notify_max_new_schemes_per_day: int = 2
 
     translate_api_key: str | None = None
 

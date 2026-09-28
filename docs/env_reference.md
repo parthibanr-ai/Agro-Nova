@@ -42,6 +42,24 @@ Crop recommendation and photo diagnosis can take from one second to over half a 
 
 Photos sent for diagnosis are held in memory only while the job runs; they are never written to the database.
 
+## Push notifications
+
+Farmers are grouped into **audiences** (country, state, the crop of their first plot, language). What a farmer should hear depends only on those four things, so each audience's digest is built and translated once, then sent in batches of 500 devices per FCM call. Measured on a real Postgres with 1,000,000 farmers: about 17 seconds and 2,700 database statements to plan and send everything (the FCM calls themselves were faked, so real FCM latency is extra), against one query per farmer before.
+
+Run it from a scheduler (for example Cloud Scheduler, once a day) with the admin key:
+
+```
+POST /api/v1/admin/notifications/dispatch                 (dry run: shows audiences and messages, sends nothing)
+POST /api/v1/admin/notifications/dispatch?dry_run=false   (queues one task per audience and returns at once)
+GET  /api/v1/admin/notifications/runs                     (progress: audiences done / running / failed, devices sent)
+```
+
+- **Safe to repeat.** Every audience-day is claimed in the database before sending, so running the dispatch twice, or a queue delivering a task twice, never sends twice. An audience that crashed is picked up again on the next dispatch.
+- **Not spammy.** A scheme is announced to an audience once, and at most `NOTIFY_MAX_NEW_SCHEMES_PER_DAY` (default 2) new ones go out per day; the daily weather and market messages still go out.
+- **Dead device tokens are cleared** when FCM reports them unregistered, so tomorrow's run does not pay for them.
+- **Fleets:** tasks run on the instance's own workers (`TASK_WORKERS`, default 4). To spread them over many instances, enqueue them on Cloud Tasks instead and point its HTTP target at `POST /api/v1/internal/tasks/notify-segment` (admin key), which runs the same handler.
+- Without Firebase credentials nothing is sent (the run only logs).
+
 ## Capacity, caching and limits
 
 Defaults suit a single server. Tune them when many farmers use the API at once.

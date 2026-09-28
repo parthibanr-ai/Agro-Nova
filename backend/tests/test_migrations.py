@@ -144,3 +144,19 @@ def test_migrations_and_first_login_race_on_real_postgres():
         app.dependency_overrides.pop(get_db, None)
         pg.dispose()
     assert codes == [200] * 40
+
+
+def test_existing_farmers_get_their_first_plots_crop_backfilled(eng):
+    _run(eng, lambda cfg: command.upgrade(cfg, "0003"))
+    with eng.begin() as conn:
+        for uid in ("has-plots", "no-plots"):
+            conn.execute(sa.text("INSERT INTO users (uid, language, country, livestock, created_at) "
+                                 f"VALUES ('{uid}', 'en', 'IN', '{{}}', '2026-01-01')"))
+        for pid, crop, created in (("p2", "rice", "2026-03-01"), ("p1", "wheat", "2026-02-01")):  # wheat is earlier
+            conn.execute(sa.text(
+                "INSERT INTO plots (id, owner_uid, name, country, crop, corners, area_m2, centroid_lat, centroid_lon, "
+                f"created_at) VALUES ('{pid}', 'has-plots', 'n', 'IN', '{crop}', '[]', 1, 1, 1, '{created}')"))
+    _run(eng, lambda cfg: command.upgrade(cfg, "head"))
+    with eng.connect() as conn:
+        got = dict(conn.execute(sa.text("SELECT uid, primary_crop FROM users")).all())
+    assert got == {"has-plots": "wheat", "no-plots": None}

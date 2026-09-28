@@ -1,10 +1,10 @@
 import logging
-from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import current_user, require_admin
+from app.core.auth import current_user
 from app.core.ratelimit import limit
 from app.core.gee_auth import earth_engine_init_error, is_earth_engine_ready
 from app.core.languages import LANGUAGES, get_language
@@ -15,7 +15,7 @@ from app.models import Plot, SoilSample, User
 from app.providers.base import ObservedClimate
 from app.providers.registry import get_climate_provider
 from app.schemas import FcmToken, LivestockRequest, PlotCreate, ProfileUpdate, SoilSampleCreate
-from app.services import advice, crop_recommendation, diagnosis, geocode, knowledge, notifications, personalized_advice, soil
+from app.services import advice, crop_recommendation, diagnosis, geocode, knowledge, personalized_advice, soil
 from app.services.enso import get_enso_state
 from app.services.forecast import build_forecast_report
 
@@ -134,6 +134,11 @@ def create_plot(body: PlotCreate, user: User = Depends(current_user), db: Sessio
         area_m2=polygon_area_m2(points), centroid_lat=clat, centroid_lon=clon,
     )
     db.add(plot)
+    if user.primary_crop is None:  # their first plot decides which notifications they get
+        user.primary_crop = plot.crop
+        if user.state is None and plot.state:
+            user.state = plot.state  # so state-specific schemes reach farmers who never filled in a profile state
+        db.merge(user)
     db.commit()
     return _plot_json(plot)
 
@@ -151,7 +156,12 @@ def get_plot(plot_id: str, user: User = Depends(current_user), db: Session = Dep
 
 @router.delete("/plots/{plot_id}", status_code=204)
 def delete_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> None:
-    db.delete(_plot_or_404(db, user, plot_id))
+    plot = _plot_or_404(db, user, plot_id)
+    db.delete(plot)
+    db.flush()
+    user.primary_crop = db.scalars(select(Plot.crop).where(Plot.owner_uid == user.uid)
+                                   .order_by(Plot.created_at, Plot.id).limit(1)).first()
+    db.merge(user)
     db.commit()
 
 
@@ -339,9 +349,3 @@ def market(plot_id: str, user: User = Depends(current_user), db: Session = Depen
     out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))
     out["personalized"] = _personalized_advice(db, "market", plot, user)
     return out
-
-
-# ------------------------------------------------------------------ notifications (admin/scheduler)
-@router.post("/admin/notifications/dispatch", dependencies=[Depends(require_admin)])
-def dispatch(dry_run: bool = True, db: Session = Depends(get_db)) -> dict:
-    return {"date": date.today().isoformat(), "dry_run": dry_run, "digests": notifications.dispatch_all(db, dry_run)}

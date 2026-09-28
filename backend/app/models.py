@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Index, String
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -17,12 +17,21 @@ def _now() -> datetime:
 
 class User(Base):
     __tablename__ = "users"
+    # Push digests walk one audience (country, state, first crop, language) in uid order, only among farmers with a
+    # device token. This partial index makes each page of 500 a short range scan however many farmers exist.
+    __table_args__ = (
+        Index("ix_users_segment", "country", "state", "primary_crop", "language", "uid",
+              postgresql_where=text("fcm_token IS NOT NULL"), sqlite_where=text("fcm_token IS NOT NULL")),
+    )
 
     uid: Mapped[str] = mapped_column(String(128), primary_key=True)
     language: Mapped[str] = mapped_column(String(10), default="en")
     country: Mapped[str] = mapped_column(String(2), default="IN")
     state: Mapped[str | None] = mapped_column(String(80), nullable=True)
     fcm_token: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Crop of the farmer's earliest plot (kept up to date when plots are added or deleted). It decides which
+    # notifications they get, and storing it here means audiences never need a join over all plots.
+    primary_crop: Mapped[str | None] = mapped_column(String(40), nullable=True)
     livestock: Mapped[dict] = mapped_column(JSON, default=dict)  # {"cows": 2, ...} for resilience advice
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -72,6 +81,27 @@ class SoilSample(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     plot: Mapped[Plot] = relationship(back_populates="soil_samples")
+
+
+class NotificationRun(Base):
+    """One audience's push digest for one day. The unique (run_date, segment_key) is the lock that makes a
+    retried or duplicated task safe: only the first claimant sends."""
+
+    __tablename__ = "notification_runs"
+    __table_args__ = (UniqueConstraint("run_date", "segment_key", name="uq_notification_run"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    run_date: Mapped[date] = mapped_column(Date)
+    segment_key: Mapped[str] = mapped_column(String(200))  # "IN|Punjab|wheat|hi"
+    status: Mapped[str] = mapped_column(String(12), default="running")  # running | done | failed
+    users: Mapped[int] = mapped_column(Integer, default=0)
+    sent: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    invalid_tokens: Mapped[int] = mapped_column(Integer, default=0)  # dead device tokens cleared this run
+    refs: Mapped[list] = mapped_column(JSON, default=list)  # scheme ids announced, so they are not repeated
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Job(Base):
