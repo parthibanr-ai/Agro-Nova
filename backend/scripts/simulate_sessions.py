@@ -177,12 +177,12 @@ def main() -> None:
 # Scenario for the recorded values: `simulate_sessions.py 150 0.3` (150 farmers in one ~33 km square). The run is
 # seeded, so the numbers repeat exactly; the headroom is for legitimate small changes.
 LIMITS_PER_FARMER = {
-    "Gemini": 2.0,  # measured 1.61
+    "Gemini": 2.75,  # measured 2.25: up from 1.61 because Hindi farmers now get their own Gemini-written advice
     "Earth Engine observed()": 1.25,  # measured 1.00: one per plot per day, however many screens are opened
     "Open-Meteo history (6 HTTP calls each)": 0.4,  # measured 0.29: shared by farmers in the same ~5 km cell
     "Open-Meteo forecast": 0.4,  # measured 0.29
     "SoilGrids": 1.25,  # measured 0.99
-    "Translation API characters": 3300,  # measured 2,593
+    "Translation API characters": 250,  # measured 88: was 2,593 before Gemini wrote advice in the farmer's language
 }
 
 

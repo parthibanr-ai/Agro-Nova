@@ -7,12 +7,12 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.admin_routes import router as admin_router
+from app.api.admin_routes import internal_router, router as admin_router
 from app.api.job_routes import router as job_router
 from app.api.routes import router
 from app.core import metrics
 from app.core.auth import require_admin_or_bearer
-from app.core.config import get_settings
+from app.core.config import check_production_settings, get_settings
 from app.core.gee_auth import init_earth_engine
 from app.core.logging_config import configure_logging, request_id_var
 from app.db import init_db
@@ -25,6 +25,7 @@ metrics.register_collector()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    check_production_settings()  # fail fast, before serving a single request
     init_db()
     init_earth_engine()
     yield
@@ -102,3 +103,4 @@ def prometheus_metrics() -> Response:
 app.include_router(router)
 app.include_router(job_router)
 app.include_router(admin_router)
+app.include_router(internal_router)

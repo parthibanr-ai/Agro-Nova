@@ -9,8 +9,10 @@ The database row is the shared state, so any instance can answer a poll. The wor
 that accepted it, on a bounded thread pool; if that instance dies, the job is marked failed after a lease
 (JOB_LEASE_S) and the app simply retries. Photo bytes are held in memory only, never stored.
 
-To move execution to a queue (Cloud Tasks / Pub/Sub) later, replace `_get_executor().submit(_run, ...)` with an
-enqueue call whose worker invokes `_run(job_id, payload)`; the claiming step below is already safe against a
+With JOB_BACKEND=cloudtasks the work is queued on Cloud Tasks instead: the photo (if any) is put in a Cloud Storage
+bucket, a task carrying only the job id is created, and Cloud Tasks calls back whichever instance has room (the
+"run_job" task below). Any instance can then run any job, the queue absorbs bursts and retries infrastructure
+failures, and nothing depends on the accepting instance staying alive. The claiming step in `_run` is safe against a
 task being delivered twice.
 """
 
@@ -34,6 +36,7 @@ from app.core import metrics
 from app.core.config import get_settings
 from app.db import SessionLocal
 from app.models import Job, User
+from app.services import payload_store, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,10 @@ def register(kind: str, handler: Handler) -> None:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _remote() -> bool:
+    return get_settings().job_backend == "cloudtasks"
 
 
 def queue_depth() -> int:
@@ -109,7 +116,9 @@ def enqueue(db: Session, user: User, kind: str, params: dict, payload: Any = Non
                           Job.expires_at > _now()).order_by(Job.created_at.desc()).limit(1)
     ).first()
     future: Future | None = None
-    if job is None:
+    if job is None and _remote():
+        job = _enqueue_remote(db, user, kind, params, payload, fingerprint)
+    elif job is None:
         with _lock:
             if _pending >= s.job_queue_max:
                 raise QueueFull()
@@ -134,7 +143,9 @@ def enqueue(db: Session, user: User, kind: str, params: dict, payload: Any = Non
         future = _futures.get(job.id)  # only present if this instance is the one running it
 
     wait = s.job_fast_wait_s if wait_s is None else wait_s
-    if future is not None and wait > 0:
+    if _remote():
+        _wait_for_row(db, job, wait)
+    elif future is not None and wait > 0:
         try:
             future.result(timeout=wait)
         except FutureTimeout:
@@ -144,6 +155,64 @@ def enqueue(db: Session, user: User, kind: str, params: dict, payload: Any = Non
     db.commit()  # end any read transaction so refresh() sees the worker's committed result
     db.refresh(job)
     return job
+
+
+def _enqueue_remote(db: Session, user: User, kind: str, params: dict, payload: Any, fingerprint: str) -> Job:
+    """Record the job, park its photo in Cloud Storage and queue a Cloud Tasks task that carries only the job id."""
+    s = get_settings()
+    now = _now()
+    job = Job(owner_uid=user.uid, kind=kind, fingerprint=fingerprint, params=params, status="queued",
+              created_at=now, expires_at=now + timedelta(seconds=s.job_ttl_s))
+    db.add(job)
+    db.commit()
+    try:
+        if payload is not None:
+            payload_store.get_payload_store().put(job.id, payload)
+        tasks.enqueue_cloud(s.cloud_tasks_job_queue, "run_job", {"job_id": job.id}, dedupe_id=job.id)
+        metrics.JOBS.labels(kind, "accepted").inc()
+    except Exception:  # noqa: BLE001 - the queue or the bucket is unreachable: tell the farmer now, not after a lease
+        logger.exception("could not queue job %s (%s)", job.id, kind)
+        db.execute(update(Job).where(Job.id == job.id, Job.status == "queued")
+                   .values(status="failed", finished_at=_now(),
+                           error={"status": 503, "message": "The service is very busy. Please try again in a few "
+                                                            "seconds."})
+                   .execution_options(synchronize_session=False))
+        db.commit()
+        _drop_payload(job.id)
+        metrics.JOBS.labels(kind, "failed").inc()
+    return job
+
+
+def _drop_payload(job_id: str) -> None:
+    try:
+        payload_store.get_payload_store().delete(job_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not delete payload of job %s", job_id, exc_info=True)
+
+
+def _wait_for_row(db: Session, job: Job, wait: float) -> None:
+    """The job runs elsewhere, so the quick wait watches the database row."""
+    deadline = time.monotonic() + wait
+    while True:
+        db.commit()  # end the read transaction so refresh() sees what the worker committed
+        db.refresh(job)
+        if job.status not in ACTIVE or time.monotonic() >= deadline:
+            return
+        time.sleep(0.15)
+
+
+def run_from_task(payload: dict) -> dict:
+    """The Cloud Tasks side: fetch the photo, run the job, and clean up. Failures of the AI work itself are recorded
+    on the job (and answer 200, so Cloud Tasks does not retry a Gemini call); only infrastructure errors raise."""
+    job_id = payload["job_id"]
+    try:
+        _run(job_id, payload_store.get_payload_store().get(job_id))
+    finally:
+        _drop_payload(job_id)
+    return {"job_id": job_id}
+
+
+tasks.register("run_job", run_from_task)
 
 
 def _finished(job_id: str) -> None:
@@ -168,7 +237,9 @@ def _run(job_id: str, payload: Any) -> None:
         if claimed != 1:
             return
         job = db.get(Job, job_id)
-        user = db.get(User, job.owner_uid)
+        user = db.get(User, job.owner_uid) if job is not None else None
+        if user is None:  # the farmer deleted their account while this waited in the queue
+            return
         kind, params = job.kind, dict(job.params or {})
         try:
             outcome = {"status": "done", "result": jsonable_encoder(_HANDLERS[kind](db, user, params, payload)),
@@ -183,8 +254,20 @@ def _run(job_id: str, payload: Any) -> None:
                    .values(finished_at=_now(), **outcome).execution_options(synchronize_session=False))
         db.commit()
         metrics.JOBS.labels(kind, outcome["status"]).inc()
-        if params.get("notify") and outcome["status"] == "done" and user.fcm_token:
+        # The app may have asked for a push while this ran (request_notification), so look again at the row.
+        wants_push = db.scalars(select(Job.params).where(Job.id == job_id)).first() or {}
+        if wants_push.get("notify") and outcome["status"] == "done" and user.fcm_token:
             _notify(user, job_id, kind)
+
+
+_READY_TITLES = {
+    "crop_recommendation": "Your crop recommendation is ready",
+    "diagnosis": "Your plant diagnosis is ready",
+    "resilience": "Your resilience plan is ready",
+    "water_tips": "Your water-saving advice is ready",
+    "market": "Your value-addition advice is ready",
+    "forecast": "Your weather forecast is ready",
+}
 
 
 def _notify(user: User, job_id: str, kind: str) -> None:
@@ -193,12 +276,31 @@ def _notify(user: User, job_id: str, kind: str) -> None:
     from app.services import notifications
     from app.services.translation import localize_payload
 
-    title = {"crop_recommendation": "Your crop recommendation is ready", "diagnosis": "Your plant diagnosis is ready"}[kind]
+    title = _READY_TITLES.get(kind, "Your answer is ready")
     try:
         msg = localize_payload({"title": title, "body": "Open Agro Nova to see it."}, get_language(user.language).code)
         notifications.send_push(user.fcm_token, msg["title"], msg["body"], {"job_id": job_id, "kind": kind})
     except Exception:  # noqa: BLE001 - a failed push must never fail the job
         logger.warning("Could not push job %s completion", job_id, exc_info=True)
+
+
+def request_notification(db: Session, user: User, job_id: str) -> str | None:
+    """The farmer left the screen (app sent to the background): push when this job finishes.
+
+    Returns "will_notify", "already_finished" (nothing to push, the app can just fetch it), or None if it is not
+    the caller's job. Safe against the race with the worker: either this update lands before the worker writes the
+    outcome (the worker then sees the flag), or the job is already finished and the update matches no row.
+    """
+    job = db.get(Job, job_id)
+    if job is None or job.owner_uid != user.uid:
+        return None
+    if job.status not in ACTIVE:
+        return "already_finished"
+    changed = db.execute(update(Job).where(Job.id == job_id, Job.status.in_(ACTIVE))
+                         .values(params={**(job.params or {}), "notify": True})
+                         .execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    return "will_notify" if changed else "already_finished"
 
 
 # ------------------------------------------------------------------ polling

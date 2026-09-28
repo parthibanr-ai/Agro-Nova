@@ -75,8 +75,8 @@ CMA) plug in as `ClimateProvider` implementations.
 2. **Machine translation of farm advice** must be reviewed by native speakers.
 3. **Bhuvan** has no stable public API; integrate through a data-sharing agreement/WMS as ISRO permits.
 4. **Earth Engine** commercial use requires the appropriate Cloud licence.
-5. Secure production: `AUTH_MODE=firebase`, a real `ADMIN_API_KEY`, Postgres. Per-farmer rate limits exist;
-   Firebase App Check (to stop scripted anonymous sign-ins) is not wired yet.
+5. Secure production: `AUTH_MODE=firebase`, a real `ADMIN_API_KEY` (the server refuses to start without one), Postgres,
+   `APP_CHECK_MODE=monitor` then `enforce` (rolled out as in OPERATIONS.md 6.4). Per-farmer rate limits exist.
 6. Offline-first for low connectivity (queue plots and soil samples locally, sync later) is not built yet.
 
 ## 6. Scaling and operations
@@ -84,16 +84,24 @@ CMA) plug in as `ClimateProvider` implementations.
 The design goal is that the cost of serving a farmer is a cache lookup, because nearly everything is shared by
 farmers in the same area. What each layer does:
 
-- **Requests never wait on a slow upstream while holding a thread or a database connection.** Slow AI requests
-  (crop recommendation, photo diagnosis) are jobs: the API answers at once (or within about 2 s if the result is
-  cached) and the app polls `GET /jobs/{id}`. Jobs are rows in the database, so any instance can answer a poll;
-  the work runs on the accepting instance's bounded worker pool, and a job whose instance dies is failed after a
-  lease so the app retries. Calls to Gemini are capped per instance (`GEMINI_MAX_CONCURRENCY`), retried within a
+- **Requests never wait on a slow upstream while holding a thread or a database connection.** Slow requests
+  (crop recommendation, photo diagnosis, the resilience, water and market advice, the forecast) are jobs: the API
+  answers at once (or within about 2 s if the result is cached) and the app polls `GET /jobs/{id}`. A farmer who
+  leaves the app while waiting gets a push when it is ready. Jobs are rows in the database, so any instance can
+  answer a poll. By default the work runs on the accepting instance's bounded worker pool, and a job whose instance
+  dies is failed after a lease so the app retries; with `JOB_BACKEND=cloudtasks` the job is queued on Cloud Tasks
+  (the photo waits in a Cloud Storage bucket) and any instance can run it. Calls to Gemini are capped per instance (`GEMINI_MAX_CONCURRENCY`), retried within a
   time budget, and paused by a circuit breaker when Gemini is overloaded. (`services/jobs.py`, `gemini_client.py`)
 - **Shared work is done once.** Weather history and forecasts are cached per ~5 km cell, SoilGrids per ~250 m
-  cell, Earth Engine per plot, and Gemini advice is shared by farmers with the same state, crop and rounded
-  conditions. Concurrent requests for the same missing item make one upstream call. (`core/cache.py`,
-  `services/advice_cache.py`, `providers/registry.py`)
+  cell, and Gemini advice is shared by farmers with the same state, crop, language and rounded conditions.
+  Concurrent requests for the same missing item make one upstream call, and with `REDIS_URL` set the caches, that
+  single flight and the rate-limit counters are shared by the whole fleet (`core/cache.py`, `core/shared_store.py`,
+  `services/advice_cache.py`, `providers/registry.py`).
+- **Satellite data is computed overnight, not per request.** `python -m app.batch.climate_snapshot` asks Earth
+  Engine about a thousand plots per request and stores one row per plot; the API reads the row in about 1 ms. (An
+  Earth Engine call for one plot takes 10 to 30 s.)
+- **Advice is written in the farmer's language by Gemini** for the widely used languages, so the paid translation
+  API only handles fixed text, which is translated once and shared.
 - **Push notifications are computed per audience, not per farmer** and sent in batches, with a database claim per
   audience-day so retries never send twice. `users.primary_crop` plus a partial index make each page of an
   audience a short index scan. Measured on Postgres 16: 1,000,000 farmers plan and send in about 17 s with FCM
@@ -105,16 +113,18 @@ farmers in the same area. What each layer does:
   `/metrics`; request ids on every log line; liveness and readiness probes; alert rules and runbooks in
   [OPERATIONS.md](OPERATIONS.md); a CI gate that fails if a change makes more upstream calls per farmer.
 
-**What is still open for a national rollout.** Caches and rate-limit counters live in each instance's memory, so a
-shared store (Redis) is needed when the instance count is large. Earth Engine is still called once per plot per
-day, at 10 to 30 s each; at national scale that becomes a nightly batch into BigQuery with the API doing a lookup.
-Firebase App Check, offline-first behaviour in the app, and written confirmation of the licence and quota terms of
-Earth Engine, Gemini and the weather sources are also open. None of this has been load-tested at national volume;
-`loadtest/k6_farmers.js` is the tool for testing a staging deployment.
+**What is still open for a national rollout.** The shared store, the queues, the nightly satellite job and App Check
+are built and tested, but Cloud Tasks, Cloud Storage, BigQuery and App Check have only been exercised against
+fakes and the Firebase console setup is manual (OPERATIONS.md section 6), so each needs one staged run before
+trusting it. Earth Engine's concurrent-request limit for the project bounds how fast the nightly job can go. The
+weather history (Open-Meteo, six calls per cold cell) is now the slowest first-visit step and will need a paid or
+self-hosted source at scale. Offline-first behaviour in the app, DPDP notice and consent screens, and written
+confirmation of the licence and quota terms of Earth Engine, Gemini and the weather sources are also open. None of
+this has been load-tested at national volume; `loadtest/k6_farmers.js` is the tool for testing a staging deployment.
 
 ## 7. Roadmap
 
-1. Now: this repo (backend tested; Flutter code written but not compiled).
-2. Compile/fix the Flutter app, wire Firebase and Maps keys, deploy to Cloud Run.
+1. Now: this repo (backend and Flutter client tested; not yet deployed anywhere).
+2. Wire Firebase and Maps keys, deploy a staging environment to Cloud Run, run the load test and the queue/App Check checks there.
 3. Scheme sync job, offline sync, voice input/output (Cloud Speech) for low-literacy users.
 4. Vertex AI seasonal model from BigQuery climatology; Bhuvan/national providers per country.

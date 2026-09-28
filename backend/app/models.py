@@ -129,3 +129,30 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ClimateSnapshot(Base):
+    """One plot's satellite and climate conditions, computed overnight in bulk by `python -m app.batch.climate_snapshot`.
+
+    Earth Engine is an analytics system: one plot takes 10 to 30 seconds, but thousands of plots in one request take
+    about the same time per batch. So the app computes everything nightly and the API only reads this table. The
+    key is a hash of the plot's rounded corners (not the plot id), so editing a plot's shape never serves the old
+    shape's numbers, and the same physical field registered twice shares one row.
+    """
+
+    __tablename__ = "climate_snapshots"
+    __table_args__ = (Index("ix_climate_snapshots_computed_on", "computed_on"),)
+
+    plot_key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    window_days: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plot_id: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)  # erased with its plot
+    computed_on: Mapped[date] = mapped_column(Date)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)  # last day the rain window covers
+    rain_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rain_normal_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tmean_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ndvi: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ndvi_normal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    soil_moisture_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

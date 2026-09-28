@@ -121,6 +121,80 @@ class GEEProvider(ClimateProvider):
             sources=sources,
         )
 
+    def observed_many(self, plots: list[tuple[str, list[tuple[float, float]]]],
+                      window_days: int) -> dict[str, ObservedClimate]:
+        """The same numbers as `observed()` for many plots in a handful of Earth Engine requests.
+
+        `plots` is [(key, corners)]. Building one image of all the bands and reducing it over a whole collection of
+        plots costs about as much as one plot does alone, which is what makes an overnight run over every farm
+        possible. Keep the plots of one call close together (sorted by area): the Sentinel-2 scene search covers all
+        of them. Raises if the rain/temperature/soil request fails; a failed NDVI request only leaves NDVI empty.
+        """
+        import ee
+
+        today = date.today()
+        chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+        latest = chirps.sort("system:time_start", False).first().date().format("YYYY-MM-dd").getInfo()
+        end = min(today, date.fromisoformat(latest) + timedelta(days=1))
+        start = end - timedelta(days=window_days)
+
+        def rain_sum(s: date, e: date):
+            return chirps.filterDate(s.isoformat(), e.isoformat()).select("precipitation").sum()
+
+        normal = ee.ImageCollection(
+            [rain_sum(_years_ago(start, k), _years_ago(end, k)) for k in range(1, NORMAL_YEARS + 1)]).mean()
+        temperature = (ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").filterDate(start.isoformat(), end.isoformat())
+                       .select("temperature_2m").mean().subtract(273.15))
+        moisture = (ee.ImageCollection("NASA/SMAP/SPL4SMGP/008")
+                    .filterDate((today - timedelta(days=7)).isoformat(), today.isoformat())
+                    .select("sm_surface").mean().multiply(100))
+        coarse = (rain_sum(start, end).rename("rain").addBands(normal.rename("rain_normal"))
+                  .addBands(temperature.rename("tmean")).addBands(moisture.rename("soil_moisture")))
+
+        keys = [k for k, _ in plots]
+        centres = []
+        for key, corners in plots:
+            lat = sum(p[0] for p in corners) / len(corners)
+            lon = sum(p[1] for p in corners) / len(corners)
+            centres.append(ee.Feature(ee.Geometry.Point([lon, lat]), {"k": key}))
+        # Rain, temperature and soil moisture pixels are 5-11 km wide: sample the centre, as observed() does.
+        sampled = coarse.reduceRegions(ee.FeatureCollection(centres), ee.Reducer.first(), 5566).getInfo()
+        values = {f["properties"]["k"]: f["properties"] for f in sampled["features"]}
+
+        ndvi_values: dict[str, dict] = {}
+        try:
+            polygons = [ee.Feature(ee.Geometry.Polygon([[(lon, lat) for lat, lon in corners]]), {"k": key})
+                        for key, corners in plots]
+            footprint = ee.Geometry.MultiPolygon([[[(lon, lat) for lat, lon in corners]] for _, corners in plots])
+
+            def ndvi(s: date, e: date):
+                return (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").filterBounds(footprint)
+                        .filterDate(s.isoformat(), e.isoformat()).filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+                        .map(lambda im: im.normalizedDifference(["B8", "B4"]).rename("ndvi")).mean())
+
+            both = (ndvi(today - timedelta(days=30), today).rename("ndvi")
+                    .addBands(ndvi(_years_ago(today - timedelta(days=30), 1), _years_ago(today, 1)).rename("ndvi_normal")))
+            reduced = both.reduceRegions(ee.FeatureCollection(polygons), ee.Reducer.mean(), 10).getInfo()
+            ndvi_values = {f["properties"]["k"]: f["properties"] for f in reduced["features"]}
+        except Exception:  # noqa: BLE001 - cloud cover can leave no scenes; keep the rest
+            ndvi_values = {}
+
+        def rounded(v, digits):
+            return round(v, digits) if isinstance(v, (int, float)) else None
+
+        out = {}
+        for key in keys:
+            c, n = values.get(key, {}), ndvi_values.get(key, {})
+            rain, rain_normal, tmean = rounded(c.get("rain"), 1), rounded(c.get("rain_normal"), 1), rounded(c.get("tmean"), 1)
+            ndvi_now, ndvi_prev = rounded(n.get("ndvi"), 3), rounded(n.get("ndvi_normal"), 3)
+            moist = rounded(c.get("soil_moisture"), 1)
+            out[key] = ObservedClimate(
+                window_days=window_days, rain_mm=rain, rain_normal_mm=rain_normal, tmean_c=tmean, ndvi=ndvi_now,
+                ndvi_normal=ndvi_prev, soil_moisture_pct=moist, as_of=end - timedelta(days=1),
+                sources=[name for name, v in (("CHIRPS", rain), ("ERA5-Land", tmean), ("Sentinel-2", ndvi_now),
+                                              ("NASA SMAP", moist)) if v is not None])
+        return out
+
     def forecast(self, lat: float, lon: float, days: int) -> list[DailyForecast]:
         # Short-range forecast comes from a numerical weather model; NOAA GFS is also in the EE catalog
         # (NOAA/GFS0P25) and can replace this call when 6-hourly bands need to be sampled inside EE.

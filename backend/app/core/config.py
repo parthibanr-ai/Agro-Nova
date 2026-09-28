@@ -1,6 +1,11 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_ADMIN_API_KEY = "change-me"
+MIN_ADMIN_KEY_LENGTH = 16
 
 
 class Settings(BaseSettings):
@@ -27,7 +32,17 @@ class Settings(BaseSettings):
     ai_cache_ttl_s: int = 24 * 3600  # Gemini advice shared by farmers with the same conditions
     translation_cache_max_entries: int = 200_000
 
-    # Per-farmer request limits on Gemini-backed endpoints (each instance counts separately).
+    # Shared store (Redis / Memorystore, single node). Optional: without REDIS_URL every instance keeps its own caches
+    # and rate-limit counters. See app/core/shared_store.py.
+    redis_url: str | None = None  # e.g. redis://10.0.0.3:6379/0
+    redis_socket_timeout_s: float = 0.3  # a slow Redis must never make a request slow: give up and go local
+    redis_max_connections: int = 50
+    redis_down_backoff_s: int = 15  # after an error, skip Redis for this long
+    shared_lock_ttl_s: int = 60  # how long one instance may hold "I am computing this" for a shared cache key
+    shared_lock_wait_s: float = 20.0  # how long another instance waits for that result before computing it itself
+
+    # Per-farmer request limits on Gemini-backed endpoints (counted across all instances when REDIS_URL is set,
+    # otherwise each instance counts separately).
     rate_limit_enabled: bool = True
     ai_rate_per_minute: int = 20
     ai_rate_per_day: int = 300
@@ -41,7 +56,25 @@ class Settings(BaseSettings):
 
     auth_mode: str = "dev"  # "dev" | "firebase"
     firebase_credentials_path: str | None = None
-    admin_api_key: str = "change-me"
+    admin_api_key: str = DEFAULT_ADMIN_API_KEY
+    # Firebase App Check proves a request comes from the genuine app (Play Integrity / App Attest / reCAPTCHA), so a
+    # script cannot mint unlimited anonymous accounts against the AI endpoints. Only used with AUTH_MODE=firebase.
+    #   off      - do not look at it (default)
+    #   monitor  - count valid/missing/invalid tokens in /metrics but let everything through: roll this out first,
+    #              watch that real farmers show up as "valid", then switch to enforce
+    #   enforce  - refuse requests without a valid token (403)
+    app_check_mode: str = "off"
+
+    # Earth Engine takes 10 to 30 s per plot. `python -m app.batch.climate_snapshot` computes every plot overnight in
+    # bulk into the climate_snapshots table and the API reads that row instead. Snapshots older than this many days
+    # are ignored (a stopped batch is noticed, not silently served for weeks).
+    ee_snapshot_max_age_days: int = 2
+    # A plot with no snapshot yet (added today): call Earth Engine live for it once (true), or skip satellite data
+    # until tonight's batch and serve the shared Open-Meteo weather meanwhile (false; use this at national scale so a
+    # burst of new plots cannot exhaust Earth Engine's quota).
+    ee_live_fallback: bool = True
+    ee_batch_chunk: int = 1000  # plots per Earth Engine request in the batch (2,500 took 34 s in a test; 500 took 22 s)
+    bigquery_table: str | None = None  # "project.dataset.table": also append each night's rows here for analytics
 
     ee_auth_mode: str = "user"  # "service_account" | "user"
     gee_service_account_email: str | None = None
@@ -65,6 +98,22 @@ class Settings(BaseSettings):
     job_ttl_s: int = 3600  # finished jobs are kept this long for polling, then purged
     job_lease_s: int = 180  # a job unfinished after this long is presumed lost (instance died) and marked failed
     task_workers: int = 4  # background task threads per instance (push-notification fan-out)
+
+    # Where background work runs. "local": on this instance's own thread pools (fine for one instance or a pilot).
+    # "cloudtasks": queued on Google Cloud Tasks, which calls back POST /api/v1/internal/tasks/{name} on whichever
+    # instance is free, retries failures and rate-limits dispatch. Set up as described in docs/OPERATIONS.md.
+    task_backend: str = "local"  # push-notification fan-out
+    job_backend: str = "local"  # AI jobs (crop recommendation, diagnosis, the other AI screens, forecast)
+    cloud_tasks_project: str | None = None  # defaults to GOOGLE_CLOUD_PROJECT / GEE_CLOUD_PROJECT
+    cloud_tasks_location: str | None = None  # defaults to GCP_LOCATION
+    cloud_tasks_queue: str = "agrin-tasks"
+    cloud_tasks_job_queue: str = "agrin-jobs"  # separate, so a burst of AI jobs cannot starve the daily digests
+    task_target_url: str | None = None  # this service's public https base URL, e.g. https://agrin-api-abc.a.run.app
+    task_service_account: str | None = None  # the service account Cloud Tasks signs its OIDC token as
+    task_audience: str | None = None  # OIDC audience; defaults to task_target_url
+    # With job_backend=cloudtasks, uploaded photos wait here (a task body is limited to 100 KB). Give the bucket a
+    # 1-day lifecycle rule; the worker also deletes each photo as soon as it is done with it.
+    job_payload_bucket: str | None = None
     # A farmer hears about each scheme once, and at most this many new ones per day, so the daily push stays worth
     # opening instead of being muted. (A backlog of 11 matching schemes is spread over about six days.)
     notify_max_new_schemes_per_day: int = 2
@@ -81,6 +130,53 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+def production_problems(s: "Settings") -> list[str]:
+    """Settings that are fine on a laptop but unsafe once real farmers sign in (AUTH_MODE=firebase).
+
+    The admin key guards /metrics, push-notification dispatch, job purging and the task endpoint, so a guessable
+    one hands the internals of a national service to anyone who reads the source repository.
+    """
+    if s.auth_mode != "firebase":
+        return []
+    problems = []
+    key = s.admin_api_key.strip()
+    if key == DEFAULT_ADMIN_API_KEY or not key:
+        problems.append("ADMIN_API_KEY is still the default value. Set a long random string, for example "
+                        "`python -c \"import secrets; print(secrets.token_urlsafe(32))\"`.")
+    elif len(key) < MIN_ADMIN_KEY_LENGTH:
+        problems.append(f"ADMIN_API_KEY is shorter than {MIN_ADMIN_KEY_LENGTH} characters.")
+    if s.app_check_mode not in ("off", "monitor", "enforce"):
+        problems.append("APP_CHECK_MODE must be off, monitor or enforce.")
+    return problems
+
+
+def configuration_problems(s: "Settings") -> list[str]:
+    """Settings that cannot work in any mode: a backend chosen without what it needs."""
+    problems = []
+    for name in ("task_backend", "job_backend"):
+        if getattr(s, name) not in ("local", "cloudtasks"):
+            problems.append(f"{name.upper()} must be local or cloudtasks.")
+    if "cloudtasks" in (s.task_backend, s.job_backend):
+        if not (s.cloud_tasks_project or os.environ.get("GOOGLE_CLOUD_PROJECT") or s.gee_cloud_project):
+            problems.append("Cloud Tasks needs CLOUD_TASKS_PROJECT (or GOOGLE_CLOUD_PROJECT).")
+        if not (s.task_target_url or "").startswith("https://"):
+            problems.append("Cloud Tasks needs TASK_TARGET_URL, this service's public https:// address.")
+        if not s.task_service_account:
+            problems.append("Cloud Tasks needs TASK_SERVICE_ACCOUNT, the service account that signs its calls back to "
+                            "this service.")
+    if s.job_backend == "cloudtasks" and not s.job_payload_bucket:
+        problems.append("JOB_BACKEND=cloudtasks needs JOB_PAYLOAD_BUCKET, where uploaded photos wait for a worker.")
+    return problems
+
+
+def check_production_settings(s: "Settings | None" = None) -> None:
+    """Refuse to start with unsafe or incomplete settings (called at start-up)."""
+    s = s or get_settings()
+    problems = configuration_problems(s) + production_problems(s)
+    if problems:
+        raise RuntimeError("Refusing to start:\n  - " + "\n  - ".join(problems))
 
 
 @lru_cache

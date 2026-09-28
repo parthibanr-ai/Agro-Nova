@@ -9,10 +9,12 @@ import logging
 from datetime import date
 
 from app.core.config import get_settings
+from app.core.languages import authoring_language
 from app.services import advice_cache, gemini_client
 from app.providers.base import ObservedClimate
-from app.services.context import plot_context_block
+from app.services.context import language_instruction, plot_context_block
 from app.services.enso import EnsoState
+from app.services.translation import LOCALIZED_MARK, localized_marker
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ _KINDS: dict[str, tuple[str, str]] = {
 
 def build_prompt(kind: str, *, country_code: str, state: str | None, area_ha: float, current_crop: str | None,
                   soil_values: dict, observed: ObservedClimate | None, enso: EnsoState, has_livestock: bool,
-                  today: date) -> str:
+                  today: date, lang: str | None = None) -> str:
     label, instruction = _KINDS[kind]
     context = plot_context_block(country_code=country_code, state=state, area_ha=area_ha, current_crop=current_crop,
                                   soil_values=soil_values, observed=observed, enso=enso, today=today)
@@ -61,6 +63,7 @@ def build_prompt(kind: str, *, country_code: str, state: str | None, area_ha: fl
         f"{instruction}\n"
         "Give 3 to 5 items, ordered by priority for this farmer right now. Reply ONLY with JSON: "
         '{"summary": str, "items": [{"title": str, "detail": str, "why": str}]}'
+        f"{language_instruction(lang)}"
     )
 
 
@@ -71,22 +74,26 @@ def call_gemini(prompt: str) -> dict:
     return gemini_client.generate_json([prompt], temperature=0.4)
 
 
-def assemble(raw: dict) -> dict:
+def assemble(raw: dict, lang: str | None = None) -> dict:
     items = [
         {"title": i.get("title", ""), "detail": i.get("detail", ""), "why": i.get("why", "")}
         for i in raw.get("items", [])
     ]
-    return {
+    out = {
         "summary": raw.get("summary", ""),
         "items": items,
         "disclaimer": "AI-assisted suggestion is a guide, not agronomic certification. Confirm with your local "
                       "Krishi Vigyan Kendra / extension officer before acting.",
     }
+    authored = authoring_language(lang)
+    if authored is not None:  # Gemini wrote these two in the farmer's language; the fixed disclaimer is translated
+        out[LOCALIZED_MARK] = localized_marker(authored.code, ["summary", "items"])
+    return out
 
 
 def advise(kind: str, *, country_code: str, state: str | None, area_ha: float, current_crop: str | None,
            soil_values: dict, observed: ObservedClimate | None, enso: EnsoState, has_livestock: bool = False,
-           today: date | None = None, model_call=None) -> dict:
+           today: date | None = None, model_call=None, lang: str | None = None) -> dict:
     if kind not in _KINDS:
         raise ValueError(f"Unknown advice kind '{kind}'")
     today = today or date.today()
@@ -95,6 +102,6 @@ def advise(kind: str, *, country_code: str, state: str | None, area_ha: float, c
         area_ha, soil_values, observed = advice_cache.bucket_inputs(area_ha, soil_values, observed)
     prompt = build_prompt(kind, country_code=country_code, state=state, area_ha=area_ha, current_crop=current_crop,
                            soil_values=soil_values, observed=observed, enso=enso, has_livestock=has_livestock,
-                           today=today)
+                           today=today, lang=lang)
     raw = model_call(prompt) if model_call is not None else advice_cache.cached_call(prompt, call_gemini)
-    return assemble(raw)
+    return assemble(raw, lang)

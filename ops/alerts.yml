@@ -109,3 +109,30 @@ groups:
         annotations:
           summary: "Requests are being refused by rate limits at a high rate (abuse, or a misbehaving app version)"
           runbook: "docs/OPERATIONS.md#rate-limit-spike"
+
+  - name: agro-nova-platform
+    rules:
+      - alert: AgroNovaSharedStoreDown
+        expr: max(agrin_shared_store_enabled) == 1 and min(agrin_shared_store_up) == 0
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Redis is configured but failing on at least one instance: caches are cold and rate limits are per instance"
+          runbook: "docs/OPERATIONS.md#shared-store-down"
+
+      - alert: AgroNovaSnapshotStale
+        expr: max(agrin_climate_snapshot_age_days) > 2
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "The nightly satellite snapshot job has not produced data for over two days"
+          runbook: "docs/OPERATIONS.md#satellite-snapshots-stale"
+
+      - alert: AgroNovaUnverifiedAppTraffic
+        expr: |
+          sum(rate(agrin_app_check_total{result!="valid"}[15m])) / sum(rate(agrin_app_check_total[15m])) > 0.2
+        for: 30m
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than 20% of requests have no valid App Check token"
+          runbook: "docs/OPERATIONS.md#unverified-app-traffic"

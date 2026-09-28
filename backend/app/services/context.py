@@ -8,6 +8,8 @@ same real numbers instead of drifting into generic advice.
 
 import json
 
+from app.core.languages import authoring_language
+
 from app.providers.base import ObservedClimate
 from app.services import knowledge
 from app.services.enso import EnsoState
@@ -21,6 +23,16 @@ _FARMER_SOIL_LABELS = {
     "p": ("Available phosphorus", "kg/ha"), "k": ("Available potassium", "kg/ha"),
     "ec": ("Electrical conductivity", "dS/m"),
 }
+
+
+def language_instruction(lang: str | None) -> str:
+    """Tell Gemini to write in the farmer's language (empty for English and for languages not yet reviewed)."""
+    language = authoring_language(lang)
+    if language is None:
+        return ""
+    return (f"\nWrite every human-readable text value in {language.name} ({language.native_name}), in plain words a "
+            "farmer would use, not formal or literary language. Keep the JSON keys and fixed values (crop_id, "
+            "high|medium|low) in English; write numbers with ordinary digits and keep units such as mm, kg/ha and C.")
 
 
 def soil_summary(values: dict) -> str:

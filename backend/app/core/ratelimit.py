@@ -1,9 +1,10 @@
 """Request limits for the endpoints that cost real money (Gemini) or hit slow upstreams.
 
 Anonymous sign-in means anyone can mint unlimited accounts, so limits are applied per farmer *and* per IP. Counters
-are fixed windows held in memory: each instance counts separately, so the effective limit across N instances is up
-to N times the setting. That is enough to stop a script or a stuck client from burning quota; exact global limits
-need a shared store (Redis) behind `_hit()`.
+are fixed windows. With REDIS_URL set they live in Redis and are exact across the whole fleet (one atomic script per
+request; a refused request is not counted, so being throttled by the minute limit does not eat the daily allowance).
+Without Redis, or while it is failing, each instance counts in its own memory, so the effective limit across N
+instances is up to N times the setting: still enough to stop a script or a stuck client from burning quota.
 
 Cache hits are cheap but are still counted, which keeps the rule simple and predictable for farmers.
 """
@@ -14,7 +15,7 @@ import time
 
 from fastapi import Depends, HTTPException, Request
 
-from app.core import metrics
+from app.core import metrics, shared_store
 from app.core.auth import current_user
 from app.core.config import get_settings
 from app.models import User
@@ -55,6 +56,29 @@ def _hit(scope: str, ident: str, limit: int, window_s: int) -> int | None:
         return None
 
 
+def _hit_shared(rules: list[tuple[str, str, int, int]]) -> tuple[str, int] | None:
+    """Count one request against every rule in Redis. Returns None if allowed, else (scope of the rule that refused,
+    seconds until its window resets). Raises StoreUnavailable if Redis cannot be used."""
+    store = shared_store.get_store()
+    if store is None:
+        raise shared_store.StoreUnavailable("no shared store")
+    now = time.time()
+    refused = store.rate_limit([(f"rl:{scope}:{ident}:{window}:{int(now // window)}", cap, window)
+                                for scope, ident, cap, window in rules])
+    if refused is None:
+        return None
+    scope, _, _, window = rules[refused]
+    return scope, max(1, math.ceil(window - (now % window)))
+
+
+def _hit_local(rules: list[tuple[str, str, int, int]]) -> tuple[str, int] | None:
+    for scope, ident, cap, window in rules:
+        wait = _hit(scope, ident, cap, window)
+        if wait is not None:
+            return scope, wait
+    return None
+
+
 def _client_ip(request: Request) -> str:
     if get_settings().trust_forwarded_for:
         forwarded = request.headers.get("x-forwarded-for")
@@ -75,15 +99,19 @@ def limit(kind: str):
             per_minute, per_day = s.diagnosis_rate_per_minute, s.diagnosis_rate_per_day
         else:
             per_minute, per_day = s.ai_rate_per_minute, s.ai_rate_per_day
-        for scope, ident, cap, window in (
+        rules = [
             (f"{kind}-min", user.uid, per_minute, 60),
             (f"{kind}-day", user.uid, per_day, 86_400),
             ("ip-min", _client_ip(request), s.ip_rate_per_minute, 60),
-        ):
-            wait = _hit(scope, ident, cap, window)
-            if wait is not None:
-                metrics.RATE_LIMITED.labels(scope).inc()
-                raise HTTPException(429, "Too many requests. Please wait a little and try again.",
-                                    headers={"Retry-After": str(wait)})
+        ]
+        try:
+            refused = _hit_shared(rules) if s.redis_url else _hit_local(rules)
+        except shared_store.StoreUnavailable:
+            refused = _hit_local(rules)  # Redis is down: fall back to this instance's own counters
+        if refused is not None:
+            scope, wait = refused
+            metrics.RATE_LIMITED.labels(scope).inc()
+            raise HTTPException(429, "Too many requests. Please wait a little and try again.",
+                                headers={"Retry-After": str(wait)})
 
     return check

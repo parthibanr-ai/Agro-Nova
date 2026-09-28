@@ -211,7 +211,7 @@ def test_a_full_queue_turns_new_work_away_with_retry_after(env, monkeypatch):
     monkeypatch.setattr(get_settings(), "job_queue_max", 1)
     monkeypatch.setattr(get_settings(), "ai_rate_per_minute", 100)
     release = threading.Event()
-    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda p: release.wait(5) or RESULT)
+    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda p: (release.wait(5), RESULT)[1])
     a, b = _plot(env.client), env.client.post("/api/v1/plots", json={"name": "Q", "crop": "rice", "country": "IN",
                                                                     "state": "Punjab", "corners": NASHIK}).json()["id"]
     assert env.client.post(f"/api/v1/plots/{a}/crop-recommendation/jobs").status_code == 202
@@ -323,3 +323,124 @@ def test_a_request_that_cannot_get_a_gemini_slot_is_told_it_is_busy(monkeypatch)
         release.set()
         assert first.result() == {"ok": True}
     gemini_client.reset_state()
+
+
+# ------------------------------------------------------------------ the other AI screens and the forecast
+ADVICE = {"summary": "Mulch and irrigate by soil moisture.", "items": [{"title": "t", "detail": "d", "why": "w"}]}
+
+
+def test_every_slow_screen_has_a_job_endpoint_that_matches_the_direct_one(env, monkeypatch):
+    from app.services import personalized_advice
+
+    monkeypatch.setattr(personalized_advice, "call_gemini", lambda p: ADVICE)
+    monkeypatch.setattr(get_settings(), "ai_rate_per_minute", 100)
+    pid = _plot(env.client)
+    cases = [
+        (f"/api/v1/resilience/jobs?plot_id={pid}", f"/api/v1/resilience?plot_id={pid}"),
+        (f"/api/v1/water-tips/jobs?plot_id={pid}", f"/api/v1/water-tips?plot_id={pid}"),
+        (f"/api/v1/plots/{pid}/market/jobs", f"/api/v1/plots/{pid}/market"),
+        (f"/api/v1/plots/{pid}/forecast/jobs?days=5", f"/api/v1/plots/{pid}/forecast?days=5"),
+    ]
+    for job_url, direct_url in cases:
+        r = env.client.post(job_url)
+        assert r.status_code == 200, (job_url, r.text)
+        body = r.json()
+        assert body["status"] == "done"
+        assert body["result"] == env.client.get(direct_url).json(), job_url
+
+
+def test_a_slow_forecast_is_accepted_then_polled(env, monkeypatch):
+    from app.api import routes
+
+    monkeypatch.setattr(get_settings(), "job_fast_wait_s", 0.05)
+    release = threading.Event()
+
+    class Slow(FakeProvider):
+        def forecast(self, lat, lon, days):
+            release.wait(5)
+            return super().forecast(lat, lon, days)
+
+    monkeypatch.setattr(routes, "get_climate_provider", lambda: Slow())
+    pid = _plot(env.client)
+    r = env.client.post(f"/api/v1/plots/{pid}/forecast/jobs")
+    assert r.status_code == 202 and r.headers["Location"].startswith("/api/v1/jobs/")
+    release.set()
+    done = _poll(env.client, r.headers["Location"])
+    assert done["status"] == "done" and len(done["result"]["daily"]) == 10
+
+
+def test_job_endpoints_404_for_someone_elses_plot_and_limit_ai_screens(env, monkeypatch):
+    pid = _plot(env.client)
+    other = {"X-Dev-User": "not-the-owner"}
+    for path in (f"/api/v1/plots/{pid}/market/jobs", f"/api/v1/plots/{pid}/forecast/jobs",
+                 f"/api/v1/resilience/jobs?plot_id={pid}", f"/api/v1/water-tips/jobs?plot_id={pid}"):
+        assert env.client.post(path, headers=other).status_code == 404, path
+    monkeypatch.setattr(get_settings(), "ai_rate_per_minute", 1)
+    assert env.client.post(f"/api/v1/plots/{pid}/market/jobs").status_code == 200
+    assert env.client.post(f"/api/v1/plots/{pid}/market/jobs").status_code == 429
+
+
+# ------------------------------------------------------------------ "your answer is ready" push
+def _slow_recommendation(monkeypatch):
+    monkeypatch.setattr(get_settings(), "job_fast_wait_s", 0.05)
+    release = threading.Event()
+    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda p: (release.wait(5), RESULT)[1])
+    return release
+
+
+def _pushes(monkeypatch):
+    from app.services import notifications
+
+    sent = []
+    monkeypatch.setattr(notifications, "send_push", lambda token, title, body, data=None: sent.append((token, title, data)) or True)
+    return sent
+
+
+def test_leaving_the_screen_asks_for_a_push_that_is_sent_when_the_job_finishes(env, monkeypatch):
+    sent, release = _pushes(monkeypatch), _slow_recommendation(monkeypatch)
+    env.client.post("/api/v1/me/fcm-token", json={"token": "tok-1"})
+    pid = _plot(env.client)
+    job = env.client.post(f"/api/v1/plots/{pid}/crop-recommendation/jobs").json()
+    r = env.client.post(f"/api/v1/jobs/{job['job_id']}/notify")
+    assert r.status_code == 200 and r.json()["status"] == "will_notify"
+    release.set()
+    _poll(env.client, f"/api/v1/jobs/{job['job_id']}")
+    for _ in range(50):  # the push is sent just after the row is marked done
+        if sent:
+            break
+        time.sleep(0.05)
+    assert len(sent) == 1
+    token, title, data = sent[0]
+    assert token == "tok-1" and "ready" in title and data == {"job_id": job["job_id"], "kind": "crop_recommendation"}
+
+
+def test_no_push_unless_the_app_asked_for_one(env, monkeypatch):
+    sent, release = _pushes(monkeypatch), _slow_recommendation(monkeypatch)
+    env.client.post("/api/v1/me/fcm-token", json={"token": "tok-1"})
+    pid = _plot(env.client)
+    job = env.client.post(f"/api/v1/plots/{pid}/crop-recommendation/jobs").json()
+    release.set()
+    _poll(env.client, f"/api/v1/jobs/{job['job_id']}")
+    time.sleep(0.2)
+    assert sent == []
+
+
+def test_asking_for_a_push_after_the_job_finished_is_a_no_op(env, monkeypatch):
+    sent = _pushes(monkeypatch)
+    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda p: RESULT)
+    env.client.post("/api/v1/me/fcm-token", json={"token": "tok-1"})
+    pid = _plot(env.client)
+    job = env.client.post(f"/api/v1/plots/{pid}/crop-recommendation/jobs").json()
+    assert job["status"] == "done"
+    r = env.client.post(f"/api/v1/jobs/{job['job_id']}/notify")
+    assert r.json()["status"] == "already_finished"
+    time.sleep(0.2)
+    assert sent == []
+
+
+def test_only_the_owner_can_ask_for_a_push(env, monkeypatch):
+    monkeypatch.setattr(crop_recommendation, "call_gemini", lambda p: RESULT)
+    pid = _plot(env.client)
+    job = env.client.post(f"/api/v1/plots/{pid}/crop-recommendation/jobs").json()
+    assert env.client.post(f"/api/v1/jobs/{job['job_id']}/notify", headers={"X-Dev-User": "x"}).status_code == 404
+    assert env.client.post("/api/v1/jobs/nope/notify").status_code == 404

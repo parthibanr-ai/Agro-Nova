@@ -9,6 +9,7 @@ from app.domain.grid import CELL_DEG, snap as _snap
 from app.providers.base import ClimateProvider, ObservedClimate
 from app.providers.gee_provider import GEEProvider
 from app.providers.open_meteo import OpenMeteoProvider
+from app.services import climate_snapshots
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,9 @@ MAX_RAIN_LAG_DAYS = 7
 _EE_FAILURE_TTL_S = 300  # a broken Earth Engine is not retried by every request, only every few minutes
 _FAILED = object()
 
-_satellite_cache = TTLCache("satellite-plot", max_entries=20_000)  # per plot: NDVI is plot-resolution
-_weather_cache = TTLCache("weather-cell", max_entries=50_000)
-_forecast_cache = TTLCache("forecast-cell", max_entries=50_000)
+_satellite_cache = TTLCache("satellite-plot", max_entries=20_000, shared=True)  # per plot: NDVI is plot-resolution
+_weather_cache = TTLCache("weather-cell", max_entries=50_000, shared=True)
+_forecast_cache = TTLCache("forecast-cell", max_entries=50_000, shared=True)
 
 
 def _plot_key(corners) -> tuple:
@@ -55,12 +56,20 @@ class ResilientProvider(ClimateProvider):
         self._fallback = OpenMeteoProvider()
 
     def _earth_engine(self, corners, window_days) -> ObservedClimate | None:
-        """This plot's Earth Engine result (cached for the day), or None if Earth Engine is off or failing."""
-        if not is_earth_engine_ready():
-            return None
+        """This plot's satellite result (cached), or None if there is none.
+
+        Last night's snapshot is used when there is one: a database row instead of a 10-30 s Earth Engine call, and
+        it works on instances that have no Earth Engine credentials at all. Otherwise this plot is fetched live, once
+        a day, unless EE_LIVE_FALLBACK is off.
+        """
         key = ("ee", _plot_key(corners), window_days, date.today())
 
         def compute():
+            snapshot = climate_snapshots.lookup(corners, window_days)
+            if snapshot is not None:
+                return snapshot
+            if not is_earth_engine_ready() or not get_settings().ee_live_fallback:
+                return _FAILED  # not remembered: tonight's batch may have it by the next request
             try:
                 return self._gee.observed(corners, window_days)
             except Exception as exc:  # noqa: BLE001

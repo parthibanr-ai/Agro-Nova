@@ -1,15 +1,18 @@
-"""Endpoints for schedulers and operators (all need the X-API-Key admin key)."""
+"""Endpoints for schedulers and operators (X-API-Key admin key), and the task endpoint that Cloud Tasks calls."""
 
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_admin
+from app.core.auth import require_admin, require_task_caller
 from app.db import get_db
 from app.services import notifications, tasks
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)])
+# Separate router: the admin key alone would force Cloud Tasks to carry a long-lived secret, so this one also accepts
+# the short-lived OIDC token Cloud Tasks signs for TASK_SERVICE_ACCOUNT.
+internal_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_task_caller)])
 
 
 @router.post("/admin/notifications/dispatch")
@@ -24,9 +27,9 @@ def runs(day: date | None = None, db: Session = Depends(get_db)) -> dict:
     return notifications.runs_summary(db, day or date.today())
 
 
-@router.post("/internal/tasks/{name}")
+@internal_router.post("/internal/tasks/{name}")
 def run_task(name: str, payload: dict) -> dict:
-    """Run a named task now. This is the HTTP target for a queue such as Cloud Tasks (see services/tasks.py)."""
+    """Run a named task now. This is the HTTP target of the Cloud Tasks queues (see services/tasks.py)."""
     try:
         return tasks.run_now(name, payload) or {}
     except KeyError as e:

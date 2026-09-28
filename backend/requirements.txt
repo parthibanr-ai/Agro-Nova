@@ -15,7 +15,12 @@ python-dotenv>=1.0
 # Google ecosystem (all optional at runtime; the app degrades gracefully without credentials)
 earthengine-api>=1.0        # satellite + climate analytics
 google-genai>=1.0           # Gemini plant diagnosis (AI Studio key or Vertex AI)
-firebase-admin>=6.5         # Firebase Auth token verification + FCM push
+firebase-admin>=6.5         # Firebase Auth token verification, App Check, FCM push
+redis>=5.0                  # optional shared cache and rate limits (REDIS_URL)
+google-cloud-tasks>=2.16    # optional: TASK_BACKEND / JOB_BACKEND = cloudtasks
+google-cloud-storage>=2.16  # optional: AI job photos with JOB_BACKEND=cloudtasks
+google-cloud-bigquery>=3.20 # optional: BIGQUERY_TABLE (nightly snapshot copy)
 
 pytest>=8.0
 pytest-mock>=3.14
+fakeredis[lua]>=2.23    # tests: Redis without a server

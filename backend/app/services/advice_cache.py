@@ -22,7 +22,7 @@ from app.core.cache import TTLCache
 from app.core.config import get_settings
 from app.providers.base import ObservedClimate
 
-_cache = TTLCache("ai-advice", max_entries=100_000)
+_cache = TTLCache("ai-advice", max_entries=100_000, shared=True)
 
 
 def _step(x: float, step: float) -> float:

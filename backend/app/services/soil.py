@@ -30,7 +30,7 @@ _CONVERT = {
 
 
 _CELL_DEG = 0.0025  # ~275 m: SoilGrids' own resolution is 250 m, so neighbours share one answer
-_cache = TTLCache("soilgrids-cell", max_entries=200_000)
+_cache = TTLCache("soilgrids-cell", max_entries=200_000, shared=True)
 
 
 def fetch_soilgrids(lat: float, lon: float) -> dict | None:

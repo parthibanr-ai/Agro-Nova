@@ -16,7 +16,7 @@ from app.models import Plot, SoilSample, User
 from app.providers.base import ObservedClimate
 from app.providers.registry import get_climate_provider
 from app.schemas import FcmToken, LivestockRequest, PlotCreate, ProfileUpdate, SoilSampleCreate
-from app.services import jobs, advice, crop_recommendation, diagnosis, geocode, knowledge, personalized_advice, soil
+from app.services import account, climate_snapshots, jobs, advice, crop_recommendation, diagnosis, geocode, knowledge, personalized_advice, soil
 from app.services.enso import get_enso_state
 from app.services.forecast import build_forecast_report
 
@@ -120,6 +120,21 @@ def update_me(body: ProfileUpdate, user: User = Depends(current_user), db: Sessi
     return me(user)
 
 
+@router.get("/me/export")
+def export_my_data(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    """Everything stored about this farmer (the right to access)."""
+    return account.export_data(db, user)
+
+
+@router.delete("/me", status_code=204)
+def delete_my_account(confirm: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)) -> None:
+    """Erase the farmer's profile, plots, soil samples and jobs for good. Needs `?confirm=true`, so a stray call
+    cannot do it."""
+    if not confirm:
+        raise HTTPException(400, "This permanently deletes your data. Send confirm=true to proceed.")
+    account.erase(db, user)
+
+
 @router.post("/me/fcm-token", status_code=204)
 def register_token(body: FcmToken, user: User = Depends(current_user), db: Session = Depends(get_db)) -> None:
     user.fcm_token = body.token
@@ -170,6 +185,7 @@ def get_plot(plot_id: str, user: User = Depends(current_user), db: Session = Dep
 @router.delete("/plots/{plot_id}", status_code=204)
 def delete_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> None:
     plot = _plot_or_404(db, user, plot_id)
+    climate_snapshots.erase_for_plots(db, [plot.id])
     db.delete(plot)
     db.flush()
     user.primary_crop = db.scalars(select(Plot.crop).where(Plot.owner_uid == user.uid)
@@ -246,13 +262,14 @@ def _plot_soil_and_climate(db: Session, plot: Plot) -> tuple[dict, ObservedClima
 
 
 @router.get("/plots/{plot_id}/crop-recommendation", dependencies=[Depends(limit("ai"))])
-def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def crop_recommendation_for_plot(plot_id: str, lang: str | None = None, user: User = Depends(current_user),
+                                 db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     soil_values, observed = _plot_soil_and_climate(db, plot)
     try:
         result = crop_recommendation.recommend(
             country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000, current_crop=plot.crop,
-            soil_values=soil_values, observed=observed, enso=get_enso_state(),
+            soil_values=soil_values, observed=observed, enso=get_enso_state(), lang=lang,
         )
     except crop_recommendation.RecommendationUnavailable as e:
         raise HTTPException(503, str(e)) from e
@@ -313,7 +330,7 @@ def schemes(plot_id: str | None = None, category: str | None = None,
                                    plot.area_m2 / 10_000 if plot else None, category)
 
 
-def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User) -> dict | None:
+def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User, lang: str | None = None) -> dict | None:
     """Hyper-personalised LLM advice grounded in this plot's soil/climate/ENSO data, or None without a plot."""
     if plot is None:
         return None
@@ -322,7 +339,7 @@ def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User) 
         return personalized_advice.advise(
             kind, country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000,
             current_crop=plot.crop, soil_values=soil_values, observed=observed, enso=get_enso_state(),
-            has_livestock=bool((user.livestock or {}).get("cows")),
+            has_livestock=bool((user.livestock or {}).get("cows")), lang=lang,
         )
     except personalized_advice.AdviceUnavailable:
         return None
@@ -332,11 +349,12 @@ def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User) 
 
 
 @router.get("/resilience", dependencies=[Depends(limit("ai"))])
-def resilience(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def resilience(plot_id: str | None = None, lang: str | None = None, user: User = Depends(current_user),
+               db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     cows = (user.livestock or {}).get("cows")
     plan = advice.resilience_plan(cows, plot.area_m2 / 4046.856 if plot else None)
-    plan["personalized"] = _personalized_advice(db, "resilience", plot, user)
+    plan["personalized"] = _personalized_advice(db, "resilience", plot, user, lang)
     return plan
 
 
@@ -348,17 +366,18 @@ def livestock_estimate(body: LivestockRequest, user: User = Depends(current_user
 
 
 @router.get("/water-tips", dependencies=[Depends(limit("ai"))])
-def water_tips(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def water_tips(plot_id: str | None = None, lang: str | None = None, user: User = Depends(current_user),
+               db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     return {
         "tips": advice.water_tips(plot.crop if plot else None, get_enso_state()),
-        "personalized": _personalized_advice(db, "water", plot, user),
+        "personalized": _personalized_advice(db, "water", plot, user, lang),
     }
 
 
 @router.get("/plots/{plot_id}/market", dependencies=[Depends(limit("ai"))])
-def market(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def market(plot_id: str, lang: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))
-    out["personalized"] = _personalized_advice(db, "market", plot, user)
+    out["personalized"] = _personalized_advice(db, "market", plot, user, lang)
     return out

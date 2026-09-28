@@ -2,7 +2,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
 
+from app.core.shared_store import shareable
 
+
+@shareable
 @dataclass
 class ObservedClimate:
     """Recent conditions over the plot, compared with the historic normal for the same window."""
@@ -18,6 +21,7 @@ class ObservedClimate:
     sources: list[str] = field(default_factory=list)
 
 
+@shareable
 @dataclass
 class DailyForecast:
     day: date

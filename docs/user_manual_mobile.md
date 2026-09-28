@@ -107,6 +107,10 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 5. **Diagnose plant:** take a photo of the affected leaf (close, in daylight) or choose one from the gallery. You get the likely deficiency, pest or disease, a natural/organic remedy with preparation steps, and why organic beats chemical. Needs `GEMINI_API_KEY` on the backend.
 6. **Government schemes, Self-resilient farming (cow calculator), Save water, Value addition & market:** open from the home screen.
 
+The advice screens can take several seconds the first time. You can leave the app while one is being prepared: if you have allowed notifications you get a message when it is ready.
+
+**Your data:** the menu (three dots, top right) has **Delete my data**. It permanently removes your plots, soil records and profile from the server. There is no undo.
+
 Advice is a guide, not a certified diagnosis. For serious problems consult your local Krishi Vigyan Kendra or agriculture officer.
 
 ## 8. Building an installable APK

@@ -61,6 +61,7 @@ While running, **r** hot-reloads, **R** restarts, **q** quits. To try it on a ph
 
 - **GPS:** the browser asks for location permission. It works on `localhost` and on `https://` sites, not on plain `http://` to another address. On a desktop the location is approximate (Wi-Fi/IP based), so for real field corners tap the map or use a phone.
 - **Photos:** **Take a photo** opens the device camera on a phone browser and a file picker on a desktop. Choose a clear JPEG or PNG under 8 MB.
+- **Delete my data:** the three-dot menu (top right) permanently removes your plots, soil records and profile from the server.
 - **Language:** the translate icon (top right). Fixed labels are translated in the browser; advice and schemes come from the backend (needs `TRANSLATE_API_KEY`).
 - **Data:** plots and soil samples are stored by the backend, not in the browser, so clearing browser data does not delete them. The selected language is remembered in the browser.
 

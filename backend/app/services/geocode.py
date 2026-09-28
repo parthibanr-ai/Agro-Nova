@@ -23,7 +23,7 @@ GOOGLE_GEOCODE = "https://maps.googleapis.com/maps/api/geocode/json"
 USER_AGENT = "AgroNova/1.0 (https://github.com/parthibanr-ai/Agro-Nova)"
 
 
-_cache = TTLCache("geocode", max_entries=50_000, default_ttl=24 * 3600)
+_cache = TTLCache("geocode", max_entries=50_000, default_ttl=24 * 3600, shared=True)
 
 
 def search(query: str, limit: int = 5) -> list[dict]:

@@ -13,11 +13,13 @@ import logging
 from datetime import date
 
 from app.core.config import get_settings
+from app.core.languages import authoring_language
 from app.services import advice_cache, gemini_client
 from app.providers.base import ObservedClimate
 from app.services import knowledge
-from app.services.context import plot_context_block
+from app.services.context import language_instruction, plot_context_block
 from app.services.enso import EnsoState
+from app.services.translation import LOCALIZED_MARK, localized_marker
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,8 @@ class RecommendationUnavailable(RuntimeError):
 
 
 def build_prompt(*, country_code: str, state: str | None, area_ha: float, current_crop: str | None,
-                  soil_values: dict, observed: ObservedClimate | None, enso: EnsoState, today: date) -> str:
+                  soil_values: dict, observed: ObservedClimate | None, enso: EnsoState, today: date,
+                  lang: str | None = None) -> str:
     crops_summary = {
         cid: {"name": c["name"], "water_mm_per_season": c["season_water_mm"], "heat_stress_c": c["heat_stress_c"],
               "frost_sensitive": c["frost_sensitive"], "drought_tolerance": c["drought_tolerance"],
@@ -50,6 +53,7 @@ def build_prompt(*, country_code: str, state: str | None, area_ha: float, curren
         "Reply ONLY with JSON: {\"target_season\": {\"local_name\": str, \"months\": str}, "
         "\"recommendations\": [{\"crop_id\": str|null, \"crop_name\": str, \"suitability\": \"high|medium|low\", "
         "\"reasoning\": str, \"water_and_soil_fit\": str, \"risks\": [str]}], \"basis_summary\": str}"
+        f"{language_instruction(lang)}"
     )
 
 
@@ -60,8 +64,9 @@ def call_gemini(prompt: str) -> dict:
     return gemini_client.generate_json([prompt], temperature=0.4)
 
 
-def assemble(raw: dict) -> dict:
+def assemble(raw: dict, lang: str | None = None) -> dict:
     known = knowledge.crops()
+    authored = authoring_language(lang)
     recs = []
     for r in raw.get("recommendations", []):
         cid = r.get("crop_id")
@@ -73,7 +78,9 @@ def assemble(raw: dict) -> dict:
             "water_and_soil_fit": r.get("water_and_soil_fit", ""),
             "risks": r.get("risks", []),
         })
-    return {
+        if authored is not None:  # crop_name of a known crop is our own English name, so it is still translated
+            recs[-1][LOCALIZED_MARK] = localized_marker(authored.code, ["reasoning", "water_and_soil_fit", "risks"])
+    out = {
         "target_season": raw.get("target_season", {}),
         "recommendations": recs,
         "basis_summary": raw.get("basis_summary", ""),
@@ -81,16 +88,19 @@ def assemble(raw: dict) -> dict:
                       "Krishi Vigyan Kendra / extension officer and check local seed availability before "
                       "committing a season's sowing.",
     }
+    if authored is not None:
+        out[LOCALIZED_MARK] = localized_marker(authored.code, ["target_season", "basis_summary"])
+    return out
 
 
 def recommend(*, country_code: str, state: str | None, area_ha: float, current_crop: str | None,
               soil_values: dict, observed: ObservedClimate | None, enso: EnsoState,
-              today: date | None = None, model_call=None) -> dict:
+              today: date | None = None, model_call=None, lang: str | None = None) -> dict:
     today = today or date.today()
     if model_call is None:
         # Production path: round the inputs so farmers in the same state, crop and conditions share one answer.
         area_ha, soil_values, observed = advice_cache.bucket_inputs(area_ha, soil_values, observed)
     prompt = build_prompt(country_code=country_code, state=state, area_ha=area_ha, current_crop=current_crop,
-                           soil_values=soil_values, observed=observed, enso=enso, today=today)
+                           soil_values=soil_values, observed=observed, enso=enso, today=today, lang=lang)
     raw = model_call(prompt) if model_call is not None else advice_cache.cached_call(prompt, call_gemini)
-    return assemble(raw)
+    return assemble(raw, lang)

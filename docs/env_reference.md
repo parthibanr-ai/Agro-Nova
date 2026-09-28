@@ -57,7 +57,7 @@ GET  /api/v1/admin/notifications/runs                     (progress: audiences d
 - **Safe to repeat.** Every audience-day is claimed in the database before sending, so running the dispatch twice, or a queue delivering a task twice, never sends twice. An audience that crashed is picked up again on the next dispatch.
 - **Not spammy.** A scheme is announced to an audience once, and at most `NOTIFY_MAX_NEW_SCHEMES_PER_DAY` (default 2) new ones go out per day; the daily weather and market messages still go out.
 - **Dead device tokens are cleared** when FCM reports them unregistered, so tomorrow's run does not pay for them.
-- **Fleets:** tasks run on the instance's own workers (`TASK_WORKERS`, default 4). To spread them over many instances, enqueue them on Cloud Tasks instead and point its HTTP target at `POST /api/v1/internal/tasks/notify-segment` (admin key), which runs the same handler.
+- **Fleets:** tasks run on the instance's own workers (`TASK_WORKERS`, default 4). To spread them over many instances set `TASK_BACKEND=cloudtasks` (see "Queues and the nightly satellite job" below): each audience becomes a Cloud Tasks task that calls `POST /api/v1/internal/tasks/notify-segment` on whichever instance is free.
 - Without Firebase credentials nothing is sent (the run only logs).
 
 ## Monitoring and logs
@@ -91,7 +91,17 @@ Defaults suit a single server. Tune them when many farmers use the API at once.
 | `IP_RATE_PER_MINUTE` | `600` | Per IP address, across those endpoints. High on purpose: mobile carriers put many farmers behind one IP, so this only stops one machine flooding the API. |
 | `TRUST_FORWARDED_FOR` | `false` | Set `true` behind a proxy that adds `X-Forwarded-For` (Cloud Run does) so limits use the real client address. |
 
-Caches and limit counters live in each server's memory, so with several instances each keeps its own (a limit of 20 per minute becomes up to 20 per instance). A shared store such as Redis would make them global; the code is arranged so that only `app/core/cache.py` and `app/core/ratelimit.py` would change.
+By default caches and limit counters live in each server's memory, so with several instances each keeps its own (a limit of 20 per minute becomes up to 20 per instance). Set `REDIS_URL` to share them across the fleet:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `REDIS_URL` | empty | `redis://host:6379/0` of a single-node Redis / Memorystore. Empty: every instance works alone. |
+| `REDIS_SOCKET_TIMEOUT_S` | `0.3` | A slower Redis is given up on for that call, so it can never make a request slow. |
+| `REDIS_DOWN_BACKOFF_S` | `15` | After an error Redis is skipped for this long (each instance uses its own memory meanwhile). |
+| `REDIS_MAX_CONNECTIONS` | `50` | Connections per instance. |
+| `SHARED_LOCK_TTL_S`, `SHARED_LOCK_WAIT_S` | `60`, `20` | Cross-instance single flight: how long one instance may hold "I am computing this", and how long another waits for that result before computing it itself. |
+
+See docs/OPERATIONS.md section 6.1.
 
 ## Login and admin
 
@@ -99,7 +109,7 @@ Caches and limit counters live in each server's memory, so with several instance
 |---|---|
 | `AUTH_MODE` | `dev`: the backend trusts an `X-Dev-User` header, so any name counts as logged in. The app sends `dev-farmer`. Local testing only; anyone who can reach the server can impersonate anyone. `firebase`: farmers sign in with Firebase Authentication and the backend verifies their signed token. Use in production. |
 | `FIREBASE_CREDENTIALS_PATH` | Used when `AUTH_MODE=firebase` and for push notifications. Path to the service-account JSON key from Firebase (Project settings > Service accounts). Firebase Authentication is not a separate API in the Library: add Firebase to your Cloud project at console.firebase.google.com, then Build > Authentication > Get started and enable **Anonymous** sign-in (the app signs in anonymously). Enabling it turns on the Identity Toolkit API, which must also be allowed on any API key the client uses. Keep it in `backend/secrets/` (git-ignored). |
-| `ADMIN_API_KEY` | Password for `POST /api/v1/admin/notifications/dispatch`, which sends scheme, weather and market push notifications. A scheduler calls it with header `X-API-Key: <value>`. Replace `change-me` with a long random string before deploying: `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| `ADMIN_API_KEY` | Password for `POST /api/v1/admin/notifications/dispatch`, which sends scheme, weather and market push notifications. A scheduler calls it with header `X-API-Key: <value>`. Replace `change-me` with a long random string before deploying: `python -c "import secrets; print(secrets.token_urlsafe(32))"`. **With `AUTH_MODE=firebase` the server refuses to start while this is still `change-me`, empty, or shorter than 16 characters.** It also guards `/metrics`, job purging and the task endpoint. |
 
 ## Google Earth Engine (satellite data)
 
@@ -160,6 +170,34 @@ The first forecast with Earth Engine active can take 10 to 30 seconds. If Earth 
 | `TRANSLATE_API_KEY` | Translates advice, remedies, schemes and notifications into the chosen language. Without it that content stays English (fixed screen labels are still translated). |
 
 To get a key: Cloud Console > enable **Cloud Translation API** (billing must be on; there is a free monthly allowance) > APIs & Services > Credentials > Create credentials > API key > restrict it to *Cloud Translation API* only. Paste into `.env` with no quotes or spaces. Test: `GET /api/v1/schemes?lang=hi` should return Hindi text. The backend caches each translated string, so repeats cost nothing. Bodo, Kashmiri, Sanskrit and Santali may not be covered and fall back to Hindi or Urdu.
+
+**Gemini writes in the farmer's language.** For Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Odia, Assamese, Nepali, Portuguese, Russian and Chinese the AI advice (crop recommendation, resilience, water, market) is written by Gemini directly in that language, and the translation layer leaves it alone. That is cheaper than translating (about 30 times fewer translated characters per farmer in the simulation) and reads more naturally, at the price of about 40% more Gemini calls because each language has its own cached answer. The other languages (Dogri, Konkani, Maithili, Manipuri, Sindhi, Bodo, Kashmiri, Sanskrit, Santali) still get English advice that is translated: extend `GEMINI_AUTHORED` in `app/core/languages.py` only after a native speaker has checked Gemini's output in that language. Fixed text (disclaimers, static tips, screen data) is always translated once and shared.
+
+## Queues and the nightly satellite job
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `TASK_BACKEND` | `local` | `local` runs push fan-out tasks on this instance; `cloudtasks` queues them on Cloud Tasks. |
+| `JOB_BACKEND` | `local` | `local` runs AI jobs on the accepting instance; `cloudtasks` queues them so any instance can run them. |
+| `CLOUD_TASKS_PROJECT`, `CLOUD_TASKS_LOCATION` | project of the service, `GCP_LOCATION` | Where the queues are. |
+| `CLOUD_TASKS_QUEUE`, `CLOUD_TASKS_JOB_QUEUE` | `agrin-tasks`, `agrin-jobs` | Queue names (jobs have their own so a burst cannot starve the daily digests). |
+| `TASK_TARGET_URL` | empty | This service's public `https://` address, which Cloud Tasks calls back. Required with either backend set to `cloudtasks`. |
+| `TASK_SERVICE_ACCOUNT`, `TASK_AUDIENCE` | empty, `TASK_TARGET_URL` | The service account Cloud Tasks signs its OIDC token as, and the token's audience. |
+| `JOB_PAYLOAD_BUCKET` | empty | Private Cloud Storage bucket where photos wait for a worker (`JOB_BACKEND=cloudtasks`). Give it a 1-day lifecycle rule. |
+| `EE_SNAPSHOT_MAX_AGE_DAYS` | `2` | Nightly satellite snapshots older than this are ignored. |
+| `EE_LIVE_FALLBACK` | `true` | A plot with no snapshot yet: `true` calls Earth Engine live for it once, `false` serves shared weather until tonight's run (use at national scale). |
+| `EE_BATCH_CHUNK` | `1000` | Plots per Earth Engine request in `python -m app.batch.climate_snapshot`. |
+| `BIGQUERY_TABLE` | empty | `project.dataset.table`: the nightly job also appends its rows there for analytics. |
+
+The service refuses to start if a backend is set to `cloudtasks` without what it needs. Setup and the trade-offs are in docs/OPERATIONS.md sections 6.2 and 6.3.
+
+## App Check and account deletion
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `APP_CHECK_MODE` | `off` | `off`, `monitor` (count valid / missing / invalid tokens in `/metrics`, refuse nothing) or `enforce` (403 without a valid Firebase App Check token). Only with `AUTH_MODE=firebase`. Roll out as `monitor` first: docs/OPERATIONS.md section 6.4. |
+
+The app sends the token in `X-Firebase-AppCheck`. `DELETE /api/v1/me?confirm=true` erases a farmer's data and `GET /api/v1/me/export` returns it (section 6.5).
 
 ## Checking what is active
 

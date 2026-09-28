@@ -52,6 +52,18 @@ LANGUAGES: list[Language] = [
 
 _BY_CODE = {lang.code.lower(): lang for lang in LANGUAGES}
 
+# Languages Gemini is asked to write farm advice in directly, which is cheaper than English text plus a paid
+# translation and reads more naturally. Deliberately a short list of widely-used languages Gemini handles well; the
+# rest (Dogri, Konkani, Maithili, Manipuri, Sindhi, Bodo, Kashmiri, Sanskrit, Santali) keep the English-then-translate
+# path until a native speaker has checked Gemini's output in that language. Extend after review.
+GEMINI_AUTHORED = {"hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "ur", "or", "as", "ne", "pt-br", "ru", "zh-cn"}
+
+
+def authoring_language(code: str | None) -> "Language | None":
+    """The language Gemini should write advice in for this request, or None to write English (and translate)."""
+    lang = get_language(code)
+    return lang if lang.code.lower() in GEMINI_AUTHORED else None
+
 
 def get_language(code: str | None) -> Language:
     """Resolve a (possibly region-tagged) code; unknown codes resolve to English."""

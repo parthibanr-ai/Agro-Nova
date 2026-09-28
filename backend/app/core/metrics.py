@@ -21,6 +21,10 @@ GEMINI_CALLS = Counter("agrin_gemini_calls_total", "Calls to Gemini by outcome",
 GEMINI_BUSY = Counter("agrin_gemini_busy_total", "Requests told Gemini is busy (no free concurrency slot)")
 JOBS = Counter("agrin_jobs_total", "AI jobs by kind and stage (accepted, deduplicated, done, failed)",
                ["kind", "stage"])
+ACCOUNTS_DELETED = Counter("agrin_accounts_deleted_total", "Farmer accounts erased at the farmer's request")
+APP_CHECK = Counter("agrin_app_check_total", "Firebase App Check results on API requests", ["result"])
+SHARED_STORE_ERRORS = Counter("agrin_shared_store_errors_total", "Failed Redis calls (the API falls back to local memory)")
+SHARED_CACHE = Counter("agrin_shared_cache_total", "Lookups in the shared (Redis) cache layer", ["cache", "result"])
 RATE_LIMITED = Counter("agrin_rate_limited_total", "Requests refused by a rate limit", ["scope"])
 
 # Requests that would only add noise: probes and the scrape itself.
@@ -52,6 +56,15 @@ class StateCollector(Collector):
         yield circuit
 
         s = get_settings()
+        from app.core import shared_store
+
+        yield GaugeMetricFamily("agrin_shared_store_enabled", "1 if REDIS_URL is set on this instance",
+                                value=1 if s.redis_url else 0)
+        # 0 while Redis is failing (this instance then runs on its own memory); also 0 when it is not configured.
+        yield GaugeMetricFamily("agrin_shared_store_up", "1 while the shared Redis store is usable",
+                                value=1 if shared_store.get_store() is not None else 0)
+        yield GaugeMetricFamily("agrin_climate_snapshot_age_days", "Days since the newest nightly satellite snapshot "
+                                "was computed (-1 if there are none)", value=_snapshot_age_days())
         yield GaugeMetricFamily("agrin_job_queue_depth", "AI jobs accepted but not finished on this instance",
                                 value=jobs.queue_depth())
         yield GaugeMetricFamily("agrin_job_queue_max", "Most unfinished jobs this instance accepts",
@@ -62,6 +75,33 @@ class StateCollector(Collector):
         yield GaugeMetricFamily("agrin_db_pool_checked_out", "Database connections in use", value=in_use)
         yield GaugeMetricFamily("agrin_db_pool_capacity", "Most database connections this instance may open",
                                 value=s.db_pool_size + s.db_max_overflow)
+
+
+_snapshot_age_cache: tuple[float, float] = (0.0, -1.0)
+
+
+def _snapshot_age_days() -> float:
+    """Age of the newest snapshot, looked up at most once a minute (one indexed MAX query)."""
+    import time
+    from datetime import date
+
+    global _snapshot_age_cache
+    at, value = _snapshot_age_cache
+    if time.monotonic() - at < 60 and at:
+        return value
+    try:
+        from sqlalchemy import func, select
+
+        from app.db import SessionLocal
+        from app.models import ClimateSnapshot
+
+        with SessionLocal() as db:
+            newest = db.scalar(select(func.max(ClimateSnapshot.computed_on)))
+        value = -1.0 if newest is None else float((date.today() - newest).days)
+    except Exception:  # noqa: BLE001 - a metrics scrape must never fail because of the database
+        value = -1.0
+    _snapshot_age_cache = (time.monotonic(), value)
+    return value
 
 
 _collector_registered = False

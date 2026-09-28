@@ -104,14 +104,15 @@ export default function () {
   group("everyday screens", () => {
     everyday("/schemes?plot_id=" + plotId);
     everyday(`/plots/${plotId}/soil`);
-    everyday(`/plots/${plotId}/forecast`);
+    aiJob(`/plots/${plotId}/forecast/jobs`);
     sleep(2 + Math.random() * 3);
   });
   if (!SKIP_AI) {
     group("AI screens", () => {
       aiJob(`/plots/${plotId}/crop-recommendation/jobs`);
-      everyday(`/resilience?plot_id=${plotId}`);
-      everyday(`/water-tips?plot_id=${plotId}`);
+      aiJob(`/resilience/jobs?plot_id=${plotId}&lang=hi`);
+      aiJob(`/water-tips/jobs?plot_id=${plotId}&lang=hi`);
+      aiJob(`/plots/${plotId}/market/jobs`);
       sleep(3 + Math.random() * 5);
     });
   }
