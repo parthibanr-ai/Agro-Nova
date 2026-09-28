@@ -1,0 +1,37 @@
+# Local monitoring for the Agro Nova API: Prometheus (scrapes /metrics, evaluates ops/alerts.yml) and Grafana
+# (dashboard "Agro Nova API"). Both are open source. See README.md in this folder.
+#
+#   docker compose up -d          then open http://localhost:3000  (login admin / admin)
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./secrets/admin_key:/etc/prometheus/admin_key:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach an API running on your machine (not needed on Docker Desktop)
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/agro-nova.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

@@ -85,6 +85,16 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_fallback_model: str | None = "gemini-3.6-flash,gemini-flash-lite-latest"
     gemini_use_vertex: bool = False
+    # Which model vendor answers, tried in this order until one succeeds. A vendor with no key is skipped, so with
+    # only GEMINI_API_KEY set this is Gemini alone. Names: openai, anthropic, gemini. Keys belong in .env only.
+    llm_order: str = "openai,anthropic,gemini"
+    llm_vendor_timeout_s: float = 20.0  # per call to OpenAI / Anthropic, so a slow vendor is passed over quickly
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"  # must accept images and JSON mode (diagnosis sends a photo)
+    openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-haiku-4-5-20251001"  # fast and accepts images
+    anthropic_base_url: str = "https://api.anthropic.com/v1"
     gcp_location: str = "asia-south1"
     # At most this many Gemini calls in flight per instance, so N instances stay inside the project's quota
     # (N x this value). Extra requests wait up to the timeout, then get a "busy, try again" answer.

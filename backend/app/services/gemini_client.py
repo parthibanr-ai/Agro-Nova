@@ -1,4 +1,7 @@
-"""Shared Gemini call used by diagnosis, crop recommendation and personalised advice.
+"""Shared model call used by diagnosis, crop recommendation and personalised advice.
+
+Vendors are tried in LLM_ORDER (default OpenAI, then Anthropic, then Gemini); the first to answer wins and a vendor
+without a key is skipped. The rest of this note is about the Gemini leg.
 
 Gemini intermittently answers 503 "high demand" (or 429) for a given model. Retry briefly, then fall back to
 GEMINI_FALLBACK_MODEL (a comma-separated list, tried in order), so a short spike does not fail the farmer's request. Other errors (bad key, bad request)
@@ -125,7 +128,139 @@ def generate_json(contents: list, temperature: float) -> dict:
         slots.release()
 
 
+def _neutral(contents: list) -> list[tuple]:
+    """Gemini-style contents (strings and image Parts) as ("text", str) / ("image", bytes, mime) tuples."""
+    out: list[tuple] = []
+    for c in contents:
+        if isinstance(c, str):
+            out.append(("text", c))
+            continue
+        blob = getattr(c, "inline_data", None)
+        if blob is not None and getattr(blob, "data", None):
+            out.append(("image", blob.data, blob.mime_type or "image/jpeg"))
+        elif getattr(c, "text", None):
+            out.append(("text", c.text))
+    return out
+
+
+def _post_json(url: str, headers: dict, body: dict, s) -> dict:
+    import httpx
+
+    r = httpx.post(url, headers=headers, json=body, timeout=s.llm_vendor_timeout_s)
+    r.raise_for_status()
+    return r.json()
+
+
+def _openai_generate(parts: list[tuple], temperature: float, s) -> dict:
+    """OpenAI chat completions over plain HTTP (no extra dependency), asking for a JSON object."""
+    import base64
+
+    content: list[dict] = []
+    for p in parts:
+        if p[0] == "text":
+            content.append({"type": "text", "text": p[1]})
+        else:
+            uri = f"data:{p[2]};base64,{base64.b64encode(p[1]).decode()}"
+            content.append({"type": "image_url", "image_url": {"url": uri}})
+    data = _post_json(
+        f"{s.openai_base_url.rstrip('/')}/chat/completions",
+        {"Authorization": f"Bearer {s.openai_api_key}"},
+        {"model": s.openai_model, "temperature": temperature, "response_format": {"type": "json_object"},
+         "messages": [{"role": "user", "content": content}]}, s)
+    return json.loads(data["choices"][0]["message"]["content"])
+
+
+def _json_from_text(text: str) -> dict:
+    """The JSON object in a model reply that may wrap it in prose or a code fence."""
+    a, b = text.find("{"), text.rfind("}")
+    if a < 0 or b < a:
+        raise ValueError("the reply contained no JSON object")
+    return json.loads(text[a:b + 1])
+
+
+def _anthropic_generate(parts: list[tuple], temperature: float, s) -> dict:
+    """Anthropic Messages API over plain HTTP. It has no JSON mode, so the object is cut out of the reply."""
+    import base64
+
+    content: list[dict] = []
+    for p in parts:
+        if p[0] == "text":
+            content.append({"type": "text", "text": p[1]})
+        else:
+            content.append({"type": "image", "source": {"type": "base64", "media_type": p[2],
+                                                        "data": base64.b64encode(p[1]).decode()}})
+    data = _post_json(
+        f"{s.anthropic_base_url.rstrip('/')}/messages",
+        {"x-api-key": s.anthropic_api_key, "anthropic-version": "2023-06-01"},
+        {"model": s.anthropic_model, "max_tokens": 4096, "temperature": min(temperature, 1.0),
+         "messages": [{"role": "user", "content": content}]}, s)
+    return _json_from_text("".join(b.get("text", "") for b in data.get("content", [])))
+
+
+# name -> (is configured?, call). The order in which they are tried is LLM_ORDER; a new vendor is one entry here.
+VENDORS = {
+    "openai": (lambda s: bool(s.openai_api_key), _openai_generate),
+    "anthropic": (lambda s: bool(s.anthropic_api_key), _anthropic_generate),
+}
+
+
+def _configured_vendors(s) -> list[str]:
+    """LLM_ORDER without the vendors that have no key. Gemini is configured by its key or by Vertex."""
+    out = []
+    for n in (x.strip().lower() for x in (s.llm_order or "").split(",")):
+        if n == "gemini" and (s.gemini_api_key or s.gemini_use_vertex):
+            out.append(n)
+        elif n in VENDORS and VENDORS[n][0](s):
+            out.append(n)
+    return out
+
+
+def any_vendor_configured(s) -> bool:
+    return bool(_configured_vendors(s))
+
+
+def _vendor_order(s) -> list[str]:
+    return _configured_vendors(s) or ["gemini"]  # nothing configured: the Gemini path reports the missing key
+
+
 def _generate(contents: list, temperature: float, s) -> dict:
+    """Try each configured vendor in LLM_ORDER; the first to answer wins.
+
+    A vendor that fails (overloaded, out of quota, timeout, bad key) is passed over, and OpenAI / Anthropic get a
+    circuit breaker like the Gemini models so a vendor that is down is skipped at once instead of costing a timeout
+    on every request. If every vendor fails, Gemini's error is raised when Gemini was tried (it is the one callers
+    already understand), else the first vendor's error.
+    """
+    first: Exception | None = None
+    gemini_error: Exception | None = None
+    parts = None
+    for name in _vendor_order(s):
+        if name == "gemini":
+            try:
+                return _generate_gemini(contents, temperature, s)
+            except Exception as e:  # noqa: BLE001
+                gemini_error = e
+                logger.warning("Gemini failed (%s)", type(e).__name__)
+                continue
+        if _is_open(name):
+            metrics.GEMINI_CALLS.labels(name, "skipped_circuit_open").inc()
+            continue
+        parts = parts if parts is not None else _neutral(contents)
+        try:
+            result = VENDORS[name][1](parts, temperature, s)
+        except Exception as e:  # noqa: BLE001 - any failure of one vendor means trying the next
+            _record_failure(name)
+            metrics.GEMINI_CALLS.labels(name, "error").inc()
+            logger.warning("%s failed (%s)", name, type(e).__name__)
+            first = first or e
+            continue
+        _record_success(name)
+        metrics.GEMINI_CALLS.labels(name, "success").inc()
+        return result
+    raise gemini_error or first or GeminiUnavailable("No model vendor is available right now.")
+
+
+def _generate_gemini(contents: list, temperature: float, s) -> dict:
     from google.genai import errors, types
 
     client = _get_client(s)
@@ -158,7 +293,8 @@ def _generate(contents: list, temperature: float, s) -> dict:
                 last = e
                 logger.warning("Gemini %s returned %s (attempt %d)", model, e.code, attempt + 1)
                 _record_failure(model)
-                if _is_open(model) or attempt == ATTEMPTS_PER_MODEL - 1:
+                if e.code == 429 or _is_open(model) or attempt == ATTEMPTS_PER_MODEL - 1:
+                    # (a 429 is an exhausted quota, which waiting a few seconds does not fix)
                     break  # nothing to wait for: the next step is another model (or giving up)
                 delay = RETRY_DELAY_S * 2 ** attempt * random.uniform(0.5, 1.5)
                 if time.monotonic() - start + delay > TOTAL_BUDGET_S:

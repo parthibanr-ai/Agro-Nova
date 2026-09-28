@@ -4,6 +4,8 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["AUTH_MODE"] = "dev"
 os.environ["TRANSLATE_API_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""  # tests must never reach a real model, whatever is in .env
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 from datetime import date, timedelta  # noqa: E402
 

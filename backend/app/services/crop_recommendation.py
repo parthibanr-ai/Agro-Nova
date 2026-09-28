@@ -59,8 +59,8 @@ def build_prompt(*, country_code: str, state: str | None, area_ha: float, curren
 
 def call_gemini(prompt: str) -> dict:
     s = get_settings()
-    if not s.gemini_api_key and not s.gemini_use_vertex:
-        raise RecommendationUnavailable("Set GEMINI_API_KEY (or GEMINI_USE_VERTEX=true with GCP credentials).")
+    if not gemini_client.any_vendor_configured(s):
+        raise RecommendationUnavailable("Set OPENAI_API_KEY, ANTHROPIC_API_KEY or GEMINI_API_KEY (or GEMINI_USE_VERTEX=true).")
     return gemini_client.generate_json([prompt], temperature=0.4)
 
 

@@ -20,6 +20,8 @@ scrape_configs:
     scheme: https
 ```
 
+**Try it locally.** [../ops/monitoring/](../ops/monitoring/README.md) is a Docker Compose stack (Prometheus, Grafana, a ready-made dashboard) that scrapes an API running on your machine.
+
 On Google Cloud, Managed Service for Prometheus can scrape the same endpoint, and the rules import as they are.
 Set `METRICS_ENABLED=false` to turn the endpoint off. Metrics carry route templates (`/plots/{plot_id}/soil`), never
 farmer or plot ids.

@@ -42,8 +42,8 @@ def build_prompt(crop: str | None, country: str | None, notes: str | None) -> st
 
 def call_gemini(image: bytes, mime_type: str, prompt: str) -> dict:
     s = get_settings()
-    if not s.gemini_api_key and not s.gemini_use_vertex:
-        raise DiagnosisUnavailable("Set GEMINI_API_KEY (or GEMINI_USE_VERTEX=true with GCP credentials).")
+    if not gemini_client.any_vendor_configured(s):
+        raise DiagnosisUnavailable("Set OPENAI_API_KEY, ANTHROPIC_API_KEY or GEMINI_API_KEY (or GEMINI_USE_VERTEX=true).")
     from google.genai import types
 
     return gemini_client.generate_json([types.Part.from_bytes(data=image, mime_type=mime_type), prompt], temperature=0.2)
