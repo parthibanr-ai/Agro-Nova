@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import 'core/app_state.dart';
 import 'l10n/app_localizations.dart';
 
 /// Loads [future] and renders [builder] with loading / error+retry states.
@@ -39,6 +41,51 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
           );
         }
         return widget.builder(context, snap.data as T);
+      },
+    );
+  }
+}
+
+/// Tells the farmer when they are working without a connection: what they see is saved on the phone, and how many
+/// changes are waiting to be sent. Sits at the bottom of every screen and takes no room when all is well.
+class ConnectivityBanner extends StatelessWidget {
+  const ConnectivityBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final t = AppLocalizations.of(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([state.api.offline, state.api.showingSaved]),
+      builder: (context, _) {
+        final notes = <Widget>[];
+        if (state.api.offline.value || state.api.showingSaved.value) notes.add(Text(t.offlineBanner));
+        if (state.pendingCount > 0) {
+          notes.add(Row(children: [
+            Expanded(child: Text(t.pendingChanges(state.pendingCount))),
+            TextButton(onPressed: state.syncPending, child: Text(t.syncNow)),
+          ]));
+        }
+        if (state.syncProblem != null) {
+          notes.add(Row(children: [
+            Expanded(child: Text(t.syncRefused(state.syncProblem!))),
+            IconButton(icon: const Icon(Icons.close), tooltip: t.close, onPressed: state.clearSyncProblem),
+          ]));
+        }
+        if (notes.isEmpty) return const SizedBox.shrink();
+        return Material(
+          color: Colors.amber.shade100,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: DefaultTextStyle.merge(
+                style: TextStyle(color: Colors.brown.shade900, fontSize: 13),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: notes),
+              ),
+            ),
+          ),
+        );
       },
     );
   }

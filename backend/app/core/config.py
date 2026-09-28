@@ -65,6 +65,21 @@ class Settings(BaseSettings):
     #   enforce  - refuse requests without a valid token (403)
     app_check_mode: str = "off"
 
+    # Consent under India's DPDP Act. The app shows the privacy notice and records the farmer's choices; this decides
+    # whether the server also refuses to process data without them:
+    #   off      - record consent but never refuse (development, and old app versions)
+    #   monitor  - count requests made without consent in /metrics (agrin_consent_total) but let them through
+    #   enforce  - refuse (403 "Consent required: <purpose>") plot and soil writes, AI features and push registration
+    #              until the farmer has accepted the current notice
+    consent_mode: str = "off"
+    # Farmers unseen for this many days are erased by `python -m app.batch.retention` (the notice says so). Pick the
+    # period with your legal adviser; the number below is a placeholder.
+    retention_days: int = 730
+    # Shown in the privacy notice as the people a farmer can write to. Must be filled in before a public launch.
+    data_controller_name: str = "Agro Nova operator"
+    grievance_officer_name: str = ""
+    grievance_officer_email: str = ""
+
     # Earth Engine takes 10 to 30 s per plot. `python -m app.batch.climate_snapshot` computes every plot overnight in
     # bulk into the climate_snapshots table and the API reads that row instead. Snapshots older than this many days
     # are ignored (a stopped batch is noticed, not silently served for weeks).
@@ -159,6 +174,8 @@ def production_problems(s: "Settings") -> list[str]:
         problems.append(f"ADMIN_API_KEY is shorter than {MIN_ADMIN_KEY_LENGTH} characters.")
     if s.app_check_mode not in ("off", "monitor", "enforce"):
         problems.append("APP_CHECK_MODE must be off, monitor or enforce.")
+    if s.consent_mode not in ("off", "monitor", "enforce"):
+        problems.append("CONSENT_MODE must be off, monitor or enforce.")
     return problems
 
 

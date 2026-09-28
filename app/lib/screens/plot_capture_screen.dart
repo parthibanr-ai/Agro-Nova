@@ -149,7 +149,9 @@ class _PlotCaptureScreenState extends State<PlotCaptureScreen> {
       _error = null;
     });
     try {
-      await context.read<AppState>().createPlot(
+      final messenger = ScaffoldMessenger.of(context);
+      final saved = AppLocalizations.of(context).savedOffline;
+      final plot = await context.read<AppState>().createPlot(
             name: _name.text.trim(),
             crop: _crop!,
             country: _country,
@@ -157,6 +159,7 @@ class _PlotCaptureScreenState extends State<PlotCaptureScreen> {
             sowingDate: _sowing,
             corners: [for (final c in _corners) [c.latitude, c.longitude]],
           );
+      if (plot.pending) messenger.showSnackBar(SnackBar(content: Text(saved)));
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
       setState(() => _error = e.message);

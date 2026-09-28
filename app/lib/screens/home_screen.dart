@@ -4,41 +4,14 @@ import 'package:provider/provider.dart';
 import '../core/app_state.dart';
 import '../core/locales.dart';
 import '../l10n/app_localizations.dart';
+import 'consent_screen.dart';
 import 'crop_recommendation_screen.dart';
 import 'diagnosis_screen.dart';
 import 'forecast_screen.dart';
 import 'info_screens.dart';
 import 'plot_capture_screen.dart';
+import 'privacy_actions.dart';
 import 'soil_screen.dart';
-
-/// Asks first, then erases the farmer's data on the server (the right to erasure).
-Future<void> _confirmDelete(BuildContext context) async {
-  final t = AppLocalizations.of(context);
-  final state = context.read<AppState>();
-  final messenger = ScaffoldMessenger.of(context);
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(t.deleteMyData),
-      content: Text(t.deleteMyDataBody),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.cancel)),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
-          onPressed: () => Navigator.pop(ctx, true),
-          child: Text(t.deleteConfirm),
-        ),
-      ],
-    ),
-  );
-  if (ok != true) return;
-  try {
-    await state.deleteAccount();
-    messenger.showSnackBar(SnackBar(content: Text(t.dataDeleted)));
-  } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text(e.toString())));
-  }
-}
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -47,7 +20,9 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
     final s = context.watch<AppState>();
-    final plot = s.selected;
+    final selected = s.selected;
+    // A plot drawn offline is not on the server yet, so the screens that need the server treat it as not chosen.
+    final plot = (selected?.pending ?? false) ? null : selected;
 
     void open(Widget page) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
 
@@ -78,8 +53,15 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
           PopupMenuButton<String>(
-            onSelected: (_) => _confirmDelete(context),
+            onSelected: (v) => v == 'privacy' ? open(const ConsentScreen(manage: true)) : confirmDeleteMyData(context),
             itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'privacy',
+                child: ListTile(
+                    leading: const Icon(Icons.privacy_tip_outlined),
+                    title: Text(t.privacyMenu),
+                    contentPadding: EdgeInsets.zero),
+              ),
               PopupMenuItem(
                 value: 'delete',
                 child: ListTile(
@@ -106,18 +88,22 @@ class HomeScreen extends StatelessWidget {
                 Card(child: Padding(padding: const EdgeInsets.all(16), child: Text(t.noPlots)))
               else
                 DropdownButtonFormField<Plot>(
-                  initialValue: plot,
+                  initialValue: selected,
                   isExpanded: true,
                   decoration: InputDecoration(labelText: t.myPlots, border: const OutlineInputBorder()),
                   items: [
                     for (final p in s.plots)
                       DropdownMenuItem(
                         value: p,
-                        child: Text('${p.name} - ${p.crop} (${p.areaAcres} ac)', overflow: TextOverflow.ellipsis),
+                        child: Text(
+                            '${p.name} - ${p.crop} (${p.areaAcres} ac)${p.pending ? ' - ${t.waitingToSync}' : ''}',
+                            overflow: TextOverflow.ellipsis),
                       ),
                   ],
                   onChanged: (p) => p == null ? null : context.read<AppState>().select(p),
                 ),
+              if (selected?.pending ?? false)
+                Padding(padding: const EdgeInsets.only(top: 8), child: Text(t.plotWaitingToSync, style: Theme.of(context).textTheme.bodySmall)),
               const SizedBox(height: 16),
               for (var i = 0; i < tiles.length; i++)
                 Card(

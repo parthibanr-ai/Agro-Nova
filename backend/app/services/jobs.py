@@ -257,7 +257,7 @@ def _run(job_id: str, payload: Any) -> None:
         # The app may have asked for a push while this ran (request_notification), so look again at the row.
         wants_push = db.scalars(select(Job.params).where(Job.id == job_id)).first() or {}
         if wants_push.get("notify") and outcome["status"] == "done" and user.fcm_token:
-            _notify(user, job_id, kind)
+            _notify(user, job_id, kind, wants_push.get("plot_id"))
 
 
 _READY_TITLES = {
@@ -270,7 +270,7 @@ _READY_TITLES = {
 }
 
 
-def _notify(user: User, job_id: str, kind: str) -> None:
+def _notify(user: User, job_id: str, kind: str, plot_id: str | None = None) -> None:
     """Tell the farmer their answer is ready, so they need not keep the screen open."""
     from app.core.languages import get_language
     from app.services import notifications
@@ -279,7 +279,8 @@ def _notify(user: User, job_id: str, kind: str) -> None:
     title = _READY_TITLES.get(kind, "Your answer is ready")
     try:
         msg = localize_payload({"title": title, "body": "Open Agro Nova to see it."}, get_language(user.language).code)
-        notifications.send_push(user.fcm_token, msg["title"], msg["body"], {"job_id": job_id, "kind": kind})
+        data = {"job_id": job_id, "kind": kind, **({"plot_id": plot_id} if plot_id else {})}  # the app opens the result
+        notifications.send_push(user.fcm_token, msg["title"], msg["body"], data)
     except Exception:  # noqa: BLE001 - a failed push must never fail the job
         logger.warning("Could not push job %s completion", job_id, exc_info=True)
 

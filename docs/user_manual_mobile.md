@@ -109,7 +109,11 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 
 The advice screens can take several seconds the first time. You can leave the app while one is being prepared: if you have allowed notifications you get a message when it is ready.
 
-**Your data:** the menu (three dots, top right) has **Delete my data**. It permanently removes your plots, soil records and profile from the server. There is no undo.
+**Your privacy:** the first time you open the app it shows how your data is used and asks what you allow. Only the first choice (your plots and farm details) is needed to use the app; AI advice and notifications are separate choices and are off until you switch them on. You can change any choice later from the menu (three dots, top right) under **Privacy and my data**, where you can also **download** everything we hold about you or **Delete my data** (permanent, no undo).
+
+**No signal:** the app shows the answers it saved last time, with a banner at the bottom saying so. A plot you draw or a soil sample you enter is kept on your phone and marked "waiting to send" until the connection returns; then it is sent by itself (or tap **Send now**). Photo diagnosis and new AI advice need a connection.
+
+**Notifications:** when an answer you asked for is ready, tapping the notification opens it directly.
 
 Advice is a guide, not a certified diagnosis. For serious problems consult your local Krishi Vigyan Kendra or agriculture officer.
 
@@ -141,6 +145,6 @@ The file is `app\build\app\outputs\flutter-apk\app-release.apk`. For the Play St
 ## 10. Tests
 
 ```powershell
-cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 45 tests
+cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend
 cd D:\AgriN\app;     flutter analyze; flutter test       # app
 ```

@@ -113,12 +113,15 @@ class _SoilSampleFormState extends State<SoilSampleForm> {
       if (v != null) vals[k] = v;
     });
     try {
-      await context.read<AppState>().api.post('/plots/${widget.plot.id}/soil', {
+      final messenger = ScaffoldMessenger.of(context);
+      final savedOffline = AppLocalizations.of(context).savedOffline;
+      final onServer = await context.read<AppState>().saveSoilSample(widget.plot, {
         'lat': double.parse(_lat.text),
         'lon': double.parse(_lon.text),
         'source': _source,
         'values': vals,
       });
+      if (!onServer) messenger.showSnackBar(SnackBar(content: Text(savedOffline)));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() => _error = e.toString());

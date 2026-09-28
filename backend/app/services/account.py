@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.core import metrics
 from app.core.config import get_settings
-from app.models import Job, Plot, User
-from app.services import climate_snapshots
+from app.models import ConsentEvent, Job, Plot, User
+from app.services import climate_snapshots, consent
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ def export_data(db: Session, user: User) -> dict:
             "livestock": user.livestock, "has_push_token": bool(user.fcm_token),
             "created_at": user.created_at.isoformat() if user.created_at else None,
         },
+        "consent": {"current": consent.state(user), "history": consent.history(db, user.uid)},
         "plots": [
             {"id": p.id, "name": p.name, "country": p.country, "state": p.state, "district": p.district,
              "crop": p.crop, "sowing_date": p.sowing_date.isoformat() if p.sowing_date else None,
@@ -44,6 +45,7 @@ def erase(db: Session, user: User) -> None:
     uid = user.uid
     climate_snapshots.erase_for_plots(db, list(db.scalars(select(Plot.id).where(Plot.owner_uid == uid))))
     db.execute(delete(Job).where(Job.owner_uid == uid).execution_options(synchronize_session=False))
+    db.execute(delete(ConsentEvent).where(ConsentEvent.uid == uid).execution_options(synchronize_session=False))
     db.delete(user)  # cascades to plots and their soil samples
     db.commit()
     metrics.ACCOUNTS_DELETED.inc()

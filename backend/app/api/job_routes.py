@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api import routes
 from app.core.auth import current_user, require_admin
+from app.core.consent import require_consent
 from app.core.languages import authoring_language
 from app.core.ratelimit import limit
 from app.db import get_db
@@ -85,7 +86,7 @@ def _start(db: Session, user: User, kind: str, params: dict, response: Response,
 
 
 # ------------------------------------------------------------------ endpoints
-@router.post("/plots/{plot_id}/crop-recommendation/jobs", dependencies=[Depends(limit("ai"))])
+@router.post("/plots/{plot_id}/crop-recommendation/jobs", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def start_crop_recommendation(plot_id: str, response: Response, notify: bool = False, lang: str | None = None,
                               user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     routes._plot_or_404(db, user, plot_id)  # a wrong plot id is an immediate 404, not a failed job
@@ -93,7 +94,7 @@ def start_crop_recommendation(plot_id: str, response: Response, notify: bool = F
                   {"plot_id": plot_id, "notify": notify, "lang": _authoring_code(lang)}, response)
 
 
-@router.post("/diagnosis/jobs", dependencies=[Depends(limit("diagnosis"))])
+@router.post("/diagnosis/jobs", dependencies=[Depends(require_consent("ai")), Depends(limit("diagnosis"))])
 def start_diagnosis(
     response: Response,
     image: UploadFile = File(...),
@@ -111,7 +112,7 @@ def start_diagnosis(
     return _start(db, user, "diagnosis", params, response, payload=data)
 
 
-@router.post("/resilience/jobs", dependencies=[Depends(limit("ai"))])
+@router.post("/resilience/jobs", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def start_resilience(response: Response, plot_id: str | None = None, notify: bool = False, lang: str | None = None,
                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     if plot_id:
@@ -120,7 +121,7 @@ def start_resilience(response: Response, plot_id: str | None = None, notify: boo
                   response)
 
 
-@router.post("/water-tips/jobs", dependencies=[Depends(limit("ai"))])
+@router.post("/water-tips/jobs", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def start_water_tips(response: Response, plot_id: str | None = None, notify: bool = False, lang: str | None = None,
                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     if plot_id:
@@ -129,7 +130,7 @@ def start_water_tips(response: Response, plot_id: str | None = None, notify: boo
                   response)
 
 
-@router.post("/plots/{plot_id}/market/jobs", dependencies=[Depends(limit("ai"))])
+@router.post("/plots/{plot_id}/market/jobs", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def start_market(plot_id: str, response: Response, notify: bool = False, lang: str | None = None,
                  user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     routes._plot_or_404(db, user, plot_id)

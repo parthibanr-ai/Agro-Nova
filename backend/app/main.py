@@ -8,6 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin_routes import internal_router, router as admin_router
+from app.api.consent_routes import router as consent_router
 from app.api.job_routes import router as job_router
 from app.api.routes import router
 from app.core import metrics
@@ -102,5 +103,6 @@ def prometheus_metrics() -> Response:
 
 app.include_router(router)
 app.include_router(job_router)
+app.include_router(consent_router)
 app.include_router(admin_router)
 app.include_router(internal_router)

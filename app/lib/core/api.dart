@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
+import 'offline.dart';
+
 class ApiException implements Exception {
   ApiException(this.status, this.message);
   final int status;
@@ -16,7 +18,7 @@ class ApiException implements Exception {
 /// Thin client for the AgriN FastAPI backend. Every request carries `lang` so the server translates
 /// dynamic content (advice, remedies, schemes) into the farmer's language.
 class Api {
-  Api({String? baseUrl, this.devUser, this.tokenProvider, this.appCheckTokenProvider})
+  Api({String? baseUrl, this.devUser, this.tokenProvider, this.appCheckTokenProvider, this.store})
       : baseUrl = baseUrl ??
             const String.fromEnvironment('API_BASE_URL',
                 defaultValue: kIsWeb ? 'http://localhost:8000' : 'http://10.0.2.2:8000');
@@ -26,13 +28,27 @@ class Api {
   static const _readTimeout = Duration(seconds: 45);
   static const _writeTimeout = Duration(seconds: 30);
   static const _uploadTimeout = Duration(seconds: 90);
-  static const _maxConnectRetries = 2;
-  static const _offlineMessage = 'No connection. Check your network and try again.';
+  /// How many times a GET is repeated when the connection itself failed (tests set 0 to run fast).
+  int connectRetries = 2;
+  static const offlineMessage = 'No connection. Check your network and try again.';
   static const _slowMessage = 'The server took too long to answer. Please try again.';
   final _rng = Random();
 
   final String baseUrl;
   final String? devUser; // AUTH_MODE=dev on the server
+  /// Answers seen before, used when the server cannot be reached (null: no offline copy, e.g. in tests).
+  final OfflineStore? store;
+
+  /// True after a request failed for lack of connection, false again after the next one gets an answer. The
+  /// app shows a banner from it.
+  final ValueNotifier<bool> offline = ValueNotifier(false);
+
+  /// True while the screen in front of the farmer is showing a saved answer instead of a fresh one.
+  final ValueNotifier<bool> showingSaved = ValueNotifier(false);
+
+  /// Called when the server says the farmer has not agreed to the privacy notice ("Consent required: ..."), so the
+  /// app can show it.
+  void Function()? onConsentRequired;
   final Future<String?> Function()? tokenProvider; // Firebase ID token in production
   /// Firebase App Check token: proves the request comes from the genuine app, not a script (see the server's
   /// APP_CHECK_MODE). Null when App Check is not set up.
@@ -63,17 +79,21 @@ class Api {
       final d = jsonDecode(utf8.decode(r.bodyBytes))['detail'];
       if (d is String) msg = d;
     } catch (_) {}
+    if (r.statusCode == 403 && msg.startsWith('Consent required')) onConsentRequired?.call();
     throw ApiException(r.statusCode, msg);
   }
 
   /// Sends one request with a timeout, turning network failures into an [ApiException] the screens can show.
   Future<http.Response> _send(Future<http.Response> Function() call, Duration timeout) async {
     try {
-      return await call().timeout(timeout);
+      final r = await call().timeout(timeout);
+      offline.value = false; // any answer, even an error, proves the connection works
+      return r;
     } on TimeoutException {
       throw ApiException(0, _slowMessage);
     } on http.ClientException {
-      throw ApiException(0, _offlineMessage);
+      offline.value = true;
+      throw ApiException(0, offlineMessage);
     }
   }
 
@@ -82,12 +102,43 @@ class Api {
   /// lockstep. Timeouts and server errors are deliberately NOT retried automatically: repeating a slow AI
   /// request would add load exactly when the server is struggling. The screen's "Try again" button covers it.
   Future<dynamic> get(String path, {Map<String, String>? query}) async {
+    final key = _cacheKey('GET', path, query);
+    try {
+      final data = await _getFromServer(path, query);
+      showingSaved.value = false;
+      if (_worthSaving(path)) await _remember(key, data);
+      return data;
+    } on ApiException catch (e) {
+      final saved = e.status == 0 ? store?.get(key) : null;
+      if (saved == null) rethrow;
+      showingSaved.value = true; // no signal: show what the phone saw last time rather than an error
+      return saved.data;
+    }
+  }
+
+  // The answer to the same question, for a farmer using the same language. Nothing here identifies the farmer:
+  // the store lives on their own phone and is wiped when they delete their data.
+  String _cacheKey(String method, String path, Map<String, String>? query) {
+    final q = {...?query, 'lang': lang};
+    final parts = (q.keys.toList()..sort()).map((k) => '$k=${q[k]}').join('&');
+    return '$method $path?$parts';
+  }
+
+  bool _worthSaving(String path) => !path.startsWith('/jobs/') && path != '/me/export' && path != '/geocode';
+
+  Future<void> _remember(String key, dynamic data) async {
+    try {
+      await store?.put(key, data);
+    } catch (_) {} // a full disk must never break a working screen
+  }
+
+  Future<dynamic> _getFromServer(String path, Map<String, String>? query) async {
     for (var attempt = 0;; attempt++) {
       try {
         return _decode(await _send(
             () async => http.get(_uri(path, query), headers: await _headers()), _readTimeout));
       } on ApiException catch (e) {
-        if (e.status != 0 || e.message != _offlineMessage || attempt >= _maxConnectRetries) rethrow;
+        if (e.status != 0 || e.message != offlineMessage || attempt >= connectRetries) rethrow;
         final base = 1000 * pow(2, attempt).toInt(); // 1 s, 2 s
         await Future<void>.delayed(Duration(milliseconds: base + _rng.nextInt(base)));
       }
@@ -97,6 +148,10 @@ class Api {
   // Writes are not retried automatically: repeating a POST could create a plot twice.
   Future<dynamic> post(String path, Map<String, dynamic> body) async => _decode(await _send(
       () async => http.post(_uri(path), headers: await _headers(), body: jsonEncode(body)), _writeTimeout));
+
+  /// Sends a queued change (see [WriteQueue]) with its original method.
+  Future<dynamic> write(String method, String path, Map<String, dynamic> body) =>
+      method == 'PUT' ? put(path, body) : post(path, body);
 
   Future<dynamic> put(String path, Map<String, dynamic> body) async => _decode(await _send(
       () async => http.put(_uri(path), headers: await _headers(), body: jsonEncode(body)), _writeTimeout));
@@ -120,6 +175,7 @@ class Api {
   /// Crop recommendation for a plot. Uses the job endpoints; an older server without them is served by the
   /// direct endpoint instead.
   Future<dynamic> cropRecommendation(String plotId) => _runJob(
+        cacheKey: _cacheKey('JOB', '/plots/$plotId/crop-recommendation', null),
         start: () async => http.post(_uri('/plots/$plotId/crop-recommendation/jobs'), headers: await _headers()),
         startTimeout: _writeTimeout,
         fallback: () => get('/plots/$plotId/crop-recommendation'),
@@ -127,6 +183,7 @@ class Api {
 
   // The other slow screens work the same way. Each falls back to its direct GET on a server without job endpoints.
   Future<dynamic> _jobOrGet(String jobPath, String directPath, [Map<String, String>? query]) => _runJob(
+        cacheKey: _cacheKey('JOB', directPath, query),
         start: () async => http.post(_uri(jobPath, query), headers: await _headers()),
         startTimeout: _writeTimeout,
         fallback: () => get(directPath, query: query),
@@ -171,6 +228,7 @@ class Api {
     }
 
     return _runJob(
+      cacheKey: null, // a photo answer is not worth keeping: the next photo is a new question
       start: () => send('/diagnosis/jobs'),
       startTimeout: _uploadTimeout,
       fallback: () async => _decode(await _send(() => send('/diagnosis'), _uploadTimeout)),
@@ -178,14 +236,31 @@ class Api {
   }
 
   Future<dynamic> _runJob({
+    required String? cacheKey,
     required Future<http.Response> Function() start,
     required Duration startTimeout,
     required Future<dynamic> Function() fallback,
   }) async {
-    final r = await _send(start, startTimeout);
-    if (r.statusCode == 404 && _detail(r) == 'Not Found') return fallback(); // server predates the job endpoints
-    return _finishJob(Map<String, dynamic>.from(_decode(r) as Map));
+    try {
+      final r = await _send(start, startTimeout);
+      final result = (r.statusCode == 404 && _detail(r) == 'Not Found')
+          ? await fallback() // server predates the job endpoints
+          : await _finishJob(Map<String, dynamic>.from(_decode(r) as Map));
+      showingSaved.value = false;
+      if (cacheKey != null) await _remember(cacheKey, result);
+      return result;
+    } on ApiException catch (e) {
+      final saved = (e.status == 0 && cacheKey != null) ? store?.get(cacheKey) : null;
+      if (saved == null) rethrow;
+      showingSaved.value = true;
+      return saved.data;
+    }
   }
+
+  /// The result of a job that finished while the farmer was away (they tapped its "ready" notification). Throws
+  /// [ApiException] 404 once the server has forgotten it (about an hour), and the screen then asks afresh.
+  Future<dynamic> jobResult(String jobId) async =>
+      _finishJob(Map<String, dynamic>.from(await get('/jobs/$jobId') as Map));
 
   /// Polls until the job is done. A failed job becomes an [ApiException] with the same status and message the
   /// direct endpoint would have produced, so screens handle one kind of error.

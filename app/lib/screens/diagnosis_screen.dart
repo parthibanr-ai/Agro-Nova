@@ -10,8 +10,11 @@ import '../widgets.dart';
 
 /// Photo -> Gemini diagnosis -> organic remedy, with the organic-vs-chemical explanation.
 class DiagnosisScreen extends StatefulWidget {
-  const DiagnosisScreen({super.key, this.plot});
+  const DiagnosisScreen({super.key, this.plot, this.openJobId});
   final Plot? plot;
+
+  /// Set when opened from a "ready" notification: show that finished diagnosis.
+  final String? openJobId;
   @override
   State<DiagnosisScreen> createState() => _DiagnosisScreenState();
 }
@@ -21,6 +24,22 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
   Map<String, dynamic>? _result;
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final id = widget.openJobId;
+    if (id != null) {
+      _busy = true;
+      context.read<AppState>().api.jobResult(id).then((r) {
+        if (mounted) setState(() => _result = Map<String, dynamic>.from(r));
+      }).catchError((Object e) {
+        if (mounted) setState(() => _error = e.toString());
+      }).whenComplete(() {
+        if (mounted) setState(() => _busy = false);
+      });
+    }
+  }
 
   Future<void> _pick(ImageSource source) async {
     final file = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 85);

@@ -3,9 +3,11 @@ import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_user
+from app.core.consent import require_consent
 from app.core.ratelimit import limit
 from app.core.gee_auth import earth_engine_init_error, is_earth_engine_ready
 from app.core.languages import LANGUAGES, get_language
@@ -48,7 +50,7 @@ def _plot_json(p: Plot) -> dict:
         "sowing_date": p.sowing_date.isoformat() if p.sowing_date else None,
         "corners": p.corners, "area_m2": round(p.area_m2, 1), "area_acres": round(p.area_m2 / 4046.856, 2),
         "area_ha": round(p.area_m2 / 10_000, 3),
-        "centroid": {"lat": p.centroid_lat, "lon": p.centroid_lon},
+        "centroid": {"lat": p.centroid_lat, "lon": p.centroid_lon}, "client_ref": p.client_ref,
     }
 
 
@@ -135,7 +137,7 @@ def delete_my_account(confirm: bool = False, user: User = Depends(current_user),
     account.erase(db, user)
 
 
-@router.post("/me/fcm-token", status_code=204)
+@router.post("/me/fcm-token", status_code=204, dependencies=[Depends(require_consent("notifications"))])
 def register_token(body: FcmToken, user: User = Depends(current_user), db: Session = Depends(get_db)) -> None:
     user.fcm_token = body.token
     db.merge(user)
@@ -143,8 +145,12 @@ def register_token(body: FcmToken, user: User = Depends(current_user), db: Sessi
 
 
 # ------------------------------------------------------------------ plots
-@router.post("/plots", status_code=201)
+@router.post("/plots", status_code=201, dependencies=[Depends(require_consent("service"))])
 def create_plot(body: PlotCreate, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    if body.client_ref:  # a retry of a plot the phone saved while offline: hand back the one already stored
+        again = db.scalars(select(Plot).where(Plot.owner_uid == user.uid, Plot.client_ref == body.client_ref)).first()
+        if again is not None:
+            return _plot_json(again)
     try:
         country = knowledge.country(body.country)
         knowledge.crop(body.crop)
@@ -158,7 +164,7 @@ def create_plot(body: PlotCreate, user: User = Depends(current_user), db: Sessio
     clat, clon = centroid(points)
     plot = Plot(
         owner_uid=user.uid, name=body.name, country=body.country.upper(), state=body.state or user.state,
-        district=body.district, cell_id=cell_id(clat, clon), crop=body.crop, sowing_date=body.sowing_date, corners=[c.model_dump() for c in body.corners],
+        district=body.district, client_ref=body.client_ref, cell_id=cell_id(clat, clon), crop=body.crop, sowing_date=body.sowing_date, corners=[c.model_dump() for c in body.corners],
         area_m2=polygon_area_m2(points), centroid_lat=clat, centroid_lon=clon,
     )
     db.add(plot)
@@ -167,7 +173,15 @@ def create_plot(body: PlotCreate, user: User = Depends(current_user), db: Sessio
         if user.state is None and plot.state:
             user.state = plot.state  # so state-specific schemes reach farmers who never filled in a profile state
         db.merge(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # the same offline plot arrived twice at once
+        db.rollback()
+        again = db.scalars(select(Plot).where(Plot.owner_uid == user.uid,
+                                              Plot.client_ref == body.client_ref)).first() if body.client_ref else None
+        if again is None:
+            raise
+        return _plot_json(again)
     return _plot_json(plot)
 
 
@@ -215,14 +229,28 @@ def get_soil(plot_id: str, user: User = Depends(current_user), db: Session = Dep
     }
 
 
-@router.post("/plots/{plot_id}/soil", status_code=201)
+@router.post("/plots/{plot_id}/soil", status_code=201, dependencies=[Depends(require_consent("service"))])
 def add_soil_sample(plot_id: str, body: SoilSampleCreate, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
+    if body.client_ref:  # a retry of a sample saved offline
+        again = db.scalars(select(SoilSample).where(SoilSample.plot_id == plot.id,
+                                                    SoilSample.client_ref == body.client_ref)).first()
+        if again is not None:
+            return {"id": again.id, "observations": soil.interpret(again.values)}
     if not (-90 <= body.lat <= 90 and -180 <= body.lon <= 180):
         raise HTTPException(422, "Sample latitude/longitude out of range")
-    sample = SoilSample(plot_id=plot.id, lat=body.lat, lon=body.lon, source=body.source, sampled_on=body.sampled_on, values=body.values)
+    sample = SoilSample(plot_id=plot.id, lat=body.lat, lon=body.lon, source=body.source, sampled_on=body.sampled_on, values=body.values,
+                        client_ref=body.client_ref)
     db.add(sample)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        again = db.scalars(select(SoilSample).where(SoilSample.plot_id == plot.id,
+                                                    SoilSample.client_ref == body.client_ref)).first() if body.client_ref else None
+        if again is None:
+            raise
+        return {"id": again.id, "observations": soil.interpret(again.values)}
     return {"id": sample.id, "observations": soil.interpret(body.values)}
 
 
@@ -261,7 +289,7 @@ def _plot_soil_and_climate(db: Session, plot: Plot) -> tuple[dict, ObservedClima
     return soil_values, observed
 
 
-@router.get("/plots/{plot_id}/crop-recommendation", dependencies=[Depends(limit("ai"))])
+@router.get("/plots/{plot_id}/crop-recommendation", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def crop_recommendation_for_plot(plot_id: str, lang: str | None = None, user: User = Depends(current_user),
                                  db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
@@ -281,7 +309,7 @@ def crop_recommendation_for_plot(plot_id: str, lang: str | None = None, user: Us
 
 
 # ------------------------------------------------------------------ diagnosis
-@router.post("/diagnosis", dependencies=[Depends(limit("diagnosis"))])
+@router.post("/diagnosis", dependencies=[Depends(require_consent("ai")), Depends(limit("diagnosis"))])
 def diagnose_plant(
     image: UploadFile = File(...),
     crop: str | None = Form(None),
@@ -348,7 +376,7 @@ def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User, 
         return None
 
 
-@router.get("/resilience", dependencies=[Depends(limit("ai"))])
+@router.get("/resilience", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def resilience(plot_id: str | None = None, lang: str | None = None, user: User = Depends(current_user),
                db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
@@ -365,7 +393,7 @@ def livestock_estimate(body: LivestockRequest, user: User = Depends(current_user
         milk_price_per_l=body.milk_price_per_l, feed_cost_per_cow_per_day=body.feed_cost_per_cow_per_day)
 
 
-@router.get("/water-tips", dependencies=[Depends(limit("ai"))])
+@router.get("/water-tips", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def water_tips(plot_id: str | None = None, lang: str | None = None, user: User = Depends(current_user),
                db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
@@ -375,7 +403,7 @@ def water_tips(plot_id: str | None = None, lang: str | None = None, user: User =
     }
 
 
-@router.get("/plots/{plot_id}/market", dependencies=[Depends(limit("ai"))])
+@router.get("/plots/{plot_id}/market", dependencies=[Depends(require_consent("ai")), Depends(limit("ai"))])
 def market(plot_id: str, lang: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))

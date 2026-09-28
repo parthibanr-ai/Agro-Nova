@@ -199,6 +199,9 @@ The service refuses to start if a backend is set to `cloudtasks` without what it
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `CONSENT_MODE` | `off` | `off`, `monitor` (count requests made without the farmer's consent in `/metrics`, refuse nothing) or `enforce` (403 "Consent required: <purpose>" for plot and soil writes, AI features and push registration until the farmer accepts the current privacy notice). Roll out as in docs/OPERATIONS.md section 6.6. |
+| `RETENTION_DAYS` | `730` | Accounts unused this long are erased by `python -m app.batch.retention --apply`, and the privacy notice states the number. A placeholder: agree it with your legal adviser. |
+| `DATA_CONTROLLER_NAME`, `GRIEVANCE_OFFICER_NAME`, `GRIEVANCE_OFFICER_EMAIL` | - | Named in the privacy notice as who a farmer can write to. Fill in before launch. |
 | `APP_CHECK_MODE` | `off` | `off`, `monitor` (count valid / missing / invalid tokens in `/metrics`, refuse nothing) or `enforce` (403 without a valid Firebase App Check token). Only with `AUTH_MODE=firebase`. Roll out as `monitor` first: docs/OPERATIONS.md section 6.4. |
 
 The app sends the token in `X-Firebase-AppCheck`. `DELETE /api/v1/me?confirm=true` erases a farmer's data and `GET /api/v1/me/export` returns it (section 6.5).

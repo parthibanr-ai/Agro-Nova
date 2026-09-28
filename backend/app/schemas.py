@@ -16,6 +16,7 @@ class PlotCreate(BaseModel):
     crop: str
     sowing_date: date | None = None
     corners: list[Corner] = Field(min_length=4, max_length=12, description="Boundary corners in walking order")
+    client_ref: str | None = Field(None, max_length=64, description="Made up by the app when it saves offline; sending the same one again returns the plot already stored")
 
 
 class ProfileUpdate(BaseModel):
@@ -35,6 +36,7 @@ class SoilSampleCreate(BaseModel):
     source: str = Field("soil_health_card", description="soil_health_card | lab_test | field_kit | other")
     sampled_on: date | None = None
     values: dict = Field(description="e.g. {'ph': 6.8, 'oc': 0.6, 'n': 240, 'p': 18, 'k': 190, 'ec': 0.4}")
+    client_ref: str | None = Field(None, max_length=64, description="Same idea as on a plot: a retry returns the stored sample")
 
 
 class LivestockRequest(BaseModel):

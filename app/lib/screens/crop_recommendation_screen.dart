@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/app_state.dart';
+import '../core/push_links.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets.dart';
 
 class CropRecommendationScreen extends StatelessWidget {
-  const CropRecommendationScreen({super.key, required this.plot});
+  const CropRecommendationScreen({super.key, required this.plot, this.openJobId});
   final Plot plot;
+
+  /// Set when opened from a "ready" notification: show that finished answer.
+  final String? openJobId;
 
   Color _suitabilityColor(BuildContext context, String? suitability) {
     switch (suitability) {
@@ -27,7 +31,7 @@ class CropRecommendationScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.cropRecommendation)),
       body: AsyncBody<dynamic>(
-        load: () => api.cropRecommendation(plot.id),
+        load: () => resultOrFresh(api, openJobId, () => api.cropRecommendation(plot.id)),
         builder: (context, d) {
           final season = d['target_season'];
           final recs = d['recommendations'] as List;

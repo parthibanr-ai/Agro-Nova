@@ -12,7 +12,13 @@
   "captureCorner": "Tap the map to add a corner",
   "useMyGps": "Use my GPS",
   "cornersCaptured": "{count} corners captured (need at least 4)",
-  "@cornersCaptured": {"placeholders": {"count": {"type": "int"}}},
+  "@cornersCaptured": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "undoCorner": "Undo last corner",
   "searchLocation": "Search a place",
   "noResultsFound": "No results found",
@@ -21,7 +27,13 @@
   "longitude": "Longitude",
   "addCorner": "Add corner",
   "coordinateEntryHelp": "Adds one corner at a time - {count} added so far. Repeat this for each remaining corner (at least 4 total).",
-  "@coordinateEntryHelp": {"placeholders": {"count": {"type": "int"}}},
+  "@coordinateEntryHelp": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "invalidCoordinates": "Enter a valid latitude (-90 to 90) and longitude (-180 to 180)",
   "savePlot": "Save plot",
   "area": "Area",
@@ -69,5 +81,40 @@
   "deleteMyDataBody": "This permanently deletes your plots, soil records and profile from our servers. It cannot be undone.",
   "cancel": "Cancel",
   "deleteConfirm": "Delete",
-  "dataDeleted": "Your data has been deleted."
+  "dataDeleted": "Your data has been deleted.",
+  "consentTitle": "Your privacy",
+  "consentAgree": "I agree and continue",
+  "consentSave": "Save my choices",
+  "consentDecline": "I do not agree",
+  "consentDeclinedBody": "Without your agreement to the first point Agro Nova cannot store your plots or give advice, so it cannot be used. You can change your mind at any time. If you want nothing kept, close the app.",
+  "consentRequired": "Required",
+  "consentContact": "Questions or complaints",
+  "consentSaved": "Your choices are saved.",
+  "privacyMenu": "Privacy and my data",
+  "downloadMyData": "Download my data",
+  "copy": "Copy",
+  "copied": "Copied to clipboard",
+  "close": "Close",
+  "offlineBanner": "No connection. Showing information saved on your phone.",
+  "pendingChanges": "Changes waiting to be sent: {count}",
+  "@pendingChanges": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "syncNow": "Send now",
+  "savedOffline": "Saved on your phone. It will be sent when you are online.",
+  "waitingToSync": "waiting to send",
+  "plotWaitingToSync": "This plot will be sent to the server when you are online. Weather, soil and advice need it there first.",
+  "syncRefused": "A saved change was not accepted: {message}",
+  "@syncRefused": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "openAnswer": "Open"
 }

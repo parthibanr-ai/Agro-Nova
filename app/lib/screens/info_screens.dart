@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_state.dart';
+import '../core/push_links.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets.dart';
 
@@ -36,8 +37,9 @@ class SchemesScreen extends StatelessWidget {
 }
 
 class ResilienceScreen extends StatefulWidget {
-  const ResilienceScreen({super.key, this.plot});
+  const ResilienceScreen({super.key, this.plot, this.openJobId});
   final Plot? plot;
+  final String? openJobId;
   @override
   State<ResilienceScreen> createState() => _ResilienceScreenState();
 }
@@ -70,7 +72,7 @@ class _ResilienceScreenState extends State<ResilienceScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(t.resilience)),
       body: AsyncBody<dynamic>(
-        load: () => api.resilience(plotId: widget.plot?.id),
+        load: () => resultOrFresh(api, widget.openJobId, () => api.resilience(plotId: widget.plot?.id)),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] == null && widget.plot == null)
@@ -105,8 +107,9 @@ class _ResilienceScreenState extends State<ResilienceScreen> {
 }
 
 class WaterTipsScreen extends StatelessWidget {
-  const WaterTipsScreen({super.key, this.plot});
+  const WaterTipsScreen({super.key, this.plot, this.openJobId});
   final Plot? plot;
+  final String? openJobId;
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +118,7 @@ class WaterTipsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.waterTips)),
       body: AsyncBody<dynamic>(
-        load: () => api.waterTips(plotId: plot?.id),
+        load: () => resultOrFresh(api, openJobId, () => api.waterTips(plotId: plot?.id)),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] == null && plot == null)
@@ -130,8 +133,9 @@ class WaterTipsScreen extends StatelessWidget {
 }
 
 class MarketScreen extends StatelessWidget {
-  const MarketScreen({super.key, required this.plot});
+  const MarketScreen({super.key, required this.plot, this.openJobId});
   final Plot plot;
+  final String? openJobId;
 
   @override
   Widget build(BuildContext context) {
@@ -140,7 +144,7 @@ class MarketScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.market)),
       body: AsyncBody<dynamic>(
-        load: () => api.market(plot.id),
+        load: () => resultOrFresh(api, openJobId, () => api.market(plot.id)),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] != null) Text(t.generalInformation, style: Theme.of(context).textTheme.titleMedium),

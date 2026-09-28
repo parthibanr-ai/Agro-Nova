@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -33,6 +33,12 @@ class User(Base):
     # notifications they get, and storing it here means audiences never need a join over all plots.
     primary_crop: Mapped[str | None] = mapped_column(String(40), nullable=True)
     livestock: Mapped[dict] = mapped_column(JSON, default=dict)  # {"cows": 2, ...} for resilience advice
+    # What the farmer agreed to: {purpose: bool}, under the privacy notice version in consent_version. The history of
+    # every change is in consent_events.
+    consents: Mapped[dict] = mapped_column(JSON, default=dict)
+    consent_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # for retention
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     plots: Mapped[list["Plot"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
@@ -41,7 +47,11 @@ class User(Base):
 class Plot(Base):
     __tablename__ = "plots"
     # Regional digests and reports group by (country, state, crop); keep that scan an index lookup.
-    __table_args__ = (Index("ix_plots_segment", "country", "state", "crop"),)
+    __table_args__ = (
+        Index("ix_plots_segment", "country", "state", "crop"),
+        # A phone that was offline saves a plot with a reference it made up; sending it twice must not make two.
+        UniqueConstraint("owner_uid", "client_ref", name="uq_plots_client_ref"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     owner_uid: Mapped[str] = mapped_column(ForeignKey("users.uid"), index=True)
@@ -56,6 +66,7 @@ class Plot(Base):
     centroid_lat: Mapped[float] = mapped_column(Float)
     centroid_lon: Mapped[float] = mapped_column(Float)
     cell_id: Mapped[str | None] = mapped_column(String(24), index=True, nullable=True)  # see app/domain/grid.py
+    client_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)  # made up by the app, see above
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     owner: Mapped[User] = relationship(back_populates="plots")
@@ -70,6 +81,7 @@ class SoilSample(Base):
     """Farmer-provided soil data (e.g. from a Soil Health Card or a new field test)."""
 
     __tablename__ = "soil_samples"
+    __table_args__ = (UniqueConstraint("plot_id", "client_ref", name="uq_soil_samples_client_ref"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     plot_id: Mapped[str] = mapped_column(ForeignKey("plots.id"), index=True)
@@ -78,9 +90,24 @@ class SoilSample(Base):
     source: Mapped[str] = mapped_column(String(60))  # "soil_health_card" | "lab_test" | "field_kit" | ...
     sampled_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     values: Mapped[dict] = mapped_column(JSON)
+    client_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     plot: Mapped[Plot] = relationship(back_populates="soil_samples")
+
+
+class ConsentEvent(Base):
+    """One change to one consent, kept as proof of what the farmer agreed to and when (append only). Erased with the
+    account: after erasure the only trace is a hashed id in the log."""
+
+    __tablename__ = "consent_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uid: Mapped[str] = mapped_column(String(128), index=True)
+    purpose: Mapped[str] = mapped_column(String(30))
+    granted: Mapped[bool] = mapped_column(Boolean)
+    notice_version: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class NotificationRun(Base):

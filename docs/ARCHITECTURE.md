@@ -77,7 +77,10 @@ CMA) plug in as `ClimateProvider` implementations.
 4. **Earth Engine** commercial use requires the appropriate Cloud licence.
 5. Secure production: `AUTH_MODE=firebase`, a real `ADMIN_API_KEY` (the server refuses to start without one), Postgres,
    `APP_CHECK_MODE=monitor` then `enforce` (rolled out as in OPERATIONS.md 6.4). Per-farmer rate limits exist.
-6. Offline-first for low connectivity (queue plots and soil samples locally, sync later) is not built yet.
+6. Privacy (India's DPDP Act): the app shows the privacy notice and records a choice per purpose; `CONSENT_MODE` decides whether the
+   server enforces it; inactive accounts are erased after `RETENTION_DAYS`; export and erasure exist. The notice text, the retention
+   period and the grievance contacts still need legal review (OPERATIONS.md sections 6.5 to 6.7).
+7. Offline: the app shows saved answers without signal and queues plots and soil samples for later, safely repeatable, sending (section 6, OPERATIONS.md 6.8).
 
 ## 6. Scaling and operations
 
@@ -118,13 +121,14 @@ are built and tested, but Cloud Tasks, Cloud Storage, BigQuery and App Check hav
 fakes and the Firebase console setup is manual (OPERATIONS.md section 6), so each needs one staged run before
 trusting it. Earth Engine's concurrent-request limit for the project bounds how fast the nightly job can go. The
 weather history (Open-Meteo, six calls per cold cell) is now the slowest first-visit step and will need a paid or
-self-hosted source at scale. Offline-first behaviour in the app, DPDP notice and consent screens, and written
-confirmation of the licence and quota terms of Earth Engine, Gemini and the weather sources are also open. None of
+self-hosted source at scale. Legal review of the DPDP notice, retention period and consent purposes, a device test of offline sync
+and push deep links, and written confirmation of the licence and quota terms of Earth Engine, Gemini, OpenAI, Anthropic and the weather
+sources are also open. None of
 this has been load-tested at national volume; `loadtest/k6_farmers.js` is the tool for testing a staging deployment.
 
 ## 7. Roadmap
 
 1. Now: this repo (backend and Flutter client tested; not yet deployed anywhere).
 2. Wire Firebase and Maps keys, deploy a staging environment to Cloud Run, run the load test and the queue/App Check checks there.
-3. Scheme sync job, offline sync, voice input/output (Cloud Speech) for low-literacy users.
+3. Scheme sync job, voice input/output for low-literacy users.
 4. Vertex AI seasonal model from BigQuery climatology; Bhuvan/national providers per country.

@@ -169,7 +169,38 @@ Only endpoints that need a signed-in farmer are checked; `/health`, `/meta/*` an
 
 ### 6.5 Erasing a farmer's data
 
-`DELETE /api/v1/me?confirm=true` (the app's menu, "Delete my data") removes the farmer's profile, device token, plots, soil samples, satellite snapshots and AI jobs, and their Firebase sign-in account, and logs a hash of the id as a record that it happened. `GET /api/v1/me/export` returns everything stored about them. Not covered by the endpoint: Cloud Logging entries (request ids only; retention is a log setting), database backups (they age out on the backup schedule; say so in the privacy notice), and anything a deployment adds elsewhere. Whether this satisfies the DPDP Act's obligations (notice, consent, retention limits, grievance officer) is a legal question for the operator; the endpoint is the technical part.
+`DELETE /api/v1/me?confirm=true` (the app's menu, "Delete my data") removes the farmer's profile, device token, plots, soil samples, satellite snapshots, AI jobs and consent history, and their Firebase sign-in account, and logs a hash of the id as a record that it happened. `GET /api/v1/me/export` returns everything stored about them. Not covered by the endpoint: Cloud Logging entries (request ids only; retention is a log setting), database backups (they age out on the backup schedule; say so in the privacy notice), and anything a deployment adds elsewhere. Whether this satisfies the DPDP Act's obligations (notice, consent, retention limits, grievance officer) is a legal question for the operator; the endpoint is the technical part.
+
+### 6.6 Privacy notice and consent (DPDP Act)
+
+The app shows the privacy notice before anything else and records the farmer's choices, one per purpose: `service` (plots and farm details, required), `ai` (conditions and photos sent to Gemini, OpenAI and Anthropic) and `notifications` (device token). Nothing is pre-ticked, changing a choice is as easy as making it (menu > "Privacy and my data"), and every change is stored in `consent_events` with the notice version and time. Withdrawing `notifications` also deletes the stored device token; refusing `service` means not using the app (or deleting the data).
+
+The wording is `backend/app/data/privacy_notice.json`, served by `GET /api/v1/consent/notice` and translated like other content, so a wording change needs no app release. **Bump `version` in that file whenever the meaning changes** (a new recipient of data, a new purpose, a different retention period): every farmer's consent then counts as stale and the app asks again. The notice must be settled with a lawyer, and its machine translations reviewed by native speakers, before launch. Fill in `DATA_CONTROLLER_NAME`, `GRIEVANCE_OFFICER_NAME` and `GRIEVANCE_OFFICER_EMAIL`: the notice names them as the people a farmer can complain to.
+
+`CONSENT_MODE` decides whether the server also refuses work without consent. Roll it out like App Check:
+
+1. Release the app version with the consent screen. Leave `CONSENT_MODE=off`; the app records choices anyway.
+2. Set `monitor`. `agrin_consent_total{purpose,result="given|missing"}` counts requests made without consent (old app versions show up as `missing`).
+3. When `missing` is a negligible share of traffic, set `enforce`. Plot and soil writes need `service`, AI screens and photo diagnosis need `ai`, registering for push needs `notifications`; each is refused with 403 "Consent required: <purpose>", which the app turns into the notice. Reading data is never blocked.
+
+`GET /api/v1/me/export` includes the consent record and its history.
+
+### 6.7 Retention (erase inactive accounts)
+
+The notice promises to delete accounts unused for `RETENTION_DAYS` (default 730, a placeholder: choose the period with your legal adviser and keep the notice in step). "Last used" is `users.last_seen_at`, refreshed on a farmer's first request each day. Run weekly from Cloud Scheduler or a Cloud Run job:
+
+```
+python -m app.batch.retention            # report only: how many accounts are due
+python -m app.batch.retention --apply    # erase them (same code as "Delete my data")
+```
+
+It refuses periods under 30 days. Accounts that existed before this feature have no `last_seen_at`, so their clock starts at creation; the first `--apply` therefore also erases long-abandoned accounts, so read the report first.
+
+### 6.8 Offline use and opening a finished answer from a notification
+
+The app keeps the answers it has seen (the last 40, bounded, on the phone) and shows them when there is no signal, with a banner saying so. A plot drawn or a soil sample entered offline is queued on the phone and sent when the connection returns (on a timer, on coming back to the app, or with the banner's "Send now"). The app gives each such record a `client_ref`; the server returns the record already stored if it sees the same `client_ref` again, so a retry never makes a duplicate. If the server later refuses a queued change (for example the shape turns out to be invalid), it is dropped and the farmer is told. Not queued: photo diagnosis and the AI screens (they need the server; the last answer for the same plot is shown instead). Deleting the account also wipes the phone's saved answers and queue.
+
+The "answer ready" push carries `job_id`, `kind` and (when the job was for a plot) `plot_id`; tapping it opens that screen with the finished result. The server keeps a result for `JOB_TTL_S` (an hour), so a notification tapped later opens the screen and asks afresh, which is quick if the answer is still cached. Neither the offline queue nor the notification tap has been tried on a physical device or with real Firebase messages; the logic is unit-tested with a fake server and the screens with widget tests.
 
 ### Shared store down
 *Alert: AgroNovaSharedStoreDown.* `REDIS_URL` is set but Redis is failing on some instance, which is running on its own memory meanwhile. Nothing breaks: caches start cold (more upstream calls, watch Gemini and Earth Engine usage) and rate limits count per instance (up to N times looser). Check Memorystore's status, the VPC connector and whether the instance ran out of memory (`used_memory` against `maxmemory`; use `allkeys-lru`). The API retries Redis every `REDIS_DOWN_BACKOFF_S` seconds by itself.

@@ -25,6 +25,8 @@ ACCOUNTS_DELETED = Counter("agrin_accounts_deleted_total", "Farmer accounts eras
 APP_CHECK = Counter("agrin_app_check_total", "Firebase App Check results on API requests", ["result"])
 SHARED_STORE_ERRORS = Counter("agrin_shared_store_errors_total", "Failed Redis calls (the API falls back to local memory)")
 SHARED_CACHE = Counter("agrin_shared_cache_total", "Lookups in the shared (Redis) cache layer", ["cache", "result"])
+CONSENT = Counter("agrin_consent_total", "Consent checks on requests that need the farmer's agreement",
+                  ["purpose", "result"])
 RATE_LIMITED = Counter("agrin_rate_limited_total", "Requests refused by a rate limit", ["scope"])
 
 # Requests that would only add noise: probes and the scrape itself.

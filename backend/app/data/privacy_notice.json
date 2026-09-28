@@ -1,0 +1,47 @@
+{
+  "version": "2026-09-1",
+  "title": "How Agro Nova uses your data",
+  "intro": "Agro Nova gives farming advice for your land. To do that it needs some information about you and your plots. This page explains what we keep, why, who else sees it, and what you can do. You choose what to allow.",
+  "purposes": [
+    {
+      "id": "service",
+      "required": true,
+      "title": "Your plots and farm details",
+      "description": "We store your plot boundaries and location, the crop and sowing date, any soil test values you enter, your language and state, and the number of animals you tell us about. We use them to work out weather, soil, crop and scheme advice for your plots. Without this the app cannot work."
+    },
+    {
+      "id": "ai",
+      "required": false,
+      "title": "AI advice and plant photos",
+      "description": "To write advice and to recognise plant problems we send your plot's conditions (crop, state, rainfall, soil values) and any plant photo you take to AI services run by Google (Gemini), OpenAI and Anthropic. We do not send your name, phone number or account id. Photos are used only to answer your request. If you do not allow this, crop recommendation, plant diagnosis and the other AI advice screens are switched off; weather, soil and schemes still work."
+    },
+    {
+      "id": "notifications",
+      "required": false,
+      "title": "Notifications",
+      "description": "We send a notification when your AI answer is ready, and now and then about new government schemes, weather and El Nino or La Nina alerts for your area and crop. To do this we keep a device token that identifies your phone to the Firebase messaging service. You can turn this off at any time."
+    }
+  ],
+  "sections": [
+    {
+      "title": "Who else receives data",
+      "body": "Google (Firebase sign-in and messaging, Earth Engine satellite data, Gemini AI, Cloud Translation), OpenAI and Anthropic (AI advice), and public data services (Open-Meteo weather, ISRIC SoilGrids, OpenStreetMap search). They receive the location or text needed for their part of your request and do not receive your name or phone number. Some of these services process data outside India. We do not sell your data and do not use it for advertising."
+    },
+    {
+      "title": "How long we keep it",
+      "body": "We keep your data while you use the app. If you do not open the app for {retention_days} days, we delete your account and everything in it. Answers you ask for are kept on our servers for about an hour so the app can fetch them, and are then removed. We keep a record of the choices you make on this page for as long as your account exists, as proof of what you agreed to."
+    },
+    {
+      "title": "Your rights",
+      "body": "You can change or withdraw any choice on this page at any time; withdrawing is as easy as agreeing. You can see everything we hold about you (Privacy > Download my data) and delete it all for good (menu > Delete my data). You can ask us to correct your data, and you can complain about how we handle it, to the person named below. You may also complain to the Data Protection Board of India."
+    },
+    {
+      "title": "Children",
+      "body": "Agro Nova is for farmers who are 18 or older. Please do not use it for a child's data."
+    },
+    {
+      "title": "Advice is a guide",
+      "body": "AI advice and diagnoses can be wrong. Confirm important decisions with your local Krishi Vigyan Kendra or agriculture officer."
+    }
+  ]
+}

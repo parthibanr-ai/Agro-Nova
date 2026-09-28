@@ -1,6 +1,7 @@
 """Authentication: Firebase ID tokens in production, an X-Dev-User header for local development."""
 
 import hmac
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -90,7 +91,20 @@ def current_user(
             user = db.get(User, uid)
             if user is None:
                 raise
+    _touch(db, user)
     return user
+
+
+def _touch(db: Session, user: User) -> None:
+    """Record that the farmer is still using the app, at most once a day (the retention job reads this)."""
+    now = datetime.now(timezone.utc)
+    seen = user.last_seen_at
+    if seen is not None:
+        seen = seen if seen.tzinfo else seen.replace(tzinfo=timezone.utc)
+        if now - seen < timedelta(days=1):
+            return
+    user.last_seen_at = now
+    db.commit()
 
 
 def _is_admin_key(candidate: str | None) -> bool:

@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/app_state.dart';
+import '../core/push_links.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets.dart';
 
 class ForecastScreen extends StatelessWidget {
-  const ForecastScreen({super.key, required this.plot});
+  const ForecastScreen({super.key, required this.plot, this.openJobId});
   final Plot plot;
+  final String? openJobId;
 
   @override
   Widget build(BuildContext context) {
@@ -16,7 +18,7 @@ class ForecastScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.forecast)),
       body: AsyncBody<dynamic>(
-        load: () => api.forecast(plot.id),
+        load: () => resultOrFresh(api, openJobId, () => api.forecast(plot.id)),
         builder: (context, d) {
           final enso = d['enso'];
           final obs = d['observed'];

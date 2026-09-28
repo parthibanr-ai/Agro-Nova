@@ -411,7 +411,7 @@ def test_leaving_the_screen_asks_for_a_push_that_is_sent_when_the_job_finishes(e
         time.sleep(0.05)
     assert len(sent) == 1
     token, title, data = sent[0]
-    assert token == "tok-1" and "ready" in title and data == {"job_id": job["job_id"], "kind": "crop_recommendation"}
+    assert token == "tok-1" and "ready" in title and data == {"job_id": job["job_id"], "kind": "crop_recommendation", "plot_id": pid}
 
 
 def test_no_push_unless_the_app_asked_for_one(env, monkeypatch):
