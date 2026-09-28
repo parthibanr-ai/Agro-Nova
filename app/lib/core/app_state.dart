@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
@@ -19,9 +19,15 @@ class Plot {
   final List<List<double>> corners;
 }
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppState(this.api);
   final Api api;
+
+  /// A farmer who leaves the app while an answer is still being prepared gets a push when it is ready.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) api.notifyPendingJobs();
+  }
 
   String language = 'en';
   List<Plot> plots = [];
@@ -30,6 +36,7 @@ class AppState extends ChangeNotifier {
   String? error;
 
   Future<void> init() async {
+    WidgetsBinding.instance.addObserver(this);
     final prefs = await SharedPreferences.getInstance();
     language = prefs.getString('lang') ?? 'en';
     api.lang = language;
@@ -59,6 +66,19 @@ class AppState extends ChangeNotifier {
     }
     loading = false;
     notifyListeners();
+  }
+
+  /// Called after the server has erased the account, so the app can drop its sign-in (see main.dart).
+  Future<void> Function()? onAccountDeleted;
+
+  /// Permanently erases this farmer's data on the server, then forgets everything held on the phone.
+  Future<void> deleteAccount() async {
+    await api.delete('/me', query: {'confirm': 'true'});
+    plots = [];
+    selected = null;
+    error = null;
+    notifyListeners();
+    await onAccountDeleted?.call();
   }
 
   void select(Plot p) {

@@ -70,7 +70,7 @@ class _ResilienceScreenState extends State<ResilienceScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(t.resilience)),
       body: AsyncBody<dynamic>(
-        load: () => api.get('/resilience', query: {if (widget.plot != null) 'plot_id': widget.plot!.id}),
+        load: () => api.resilience(plotId: widget.plot?.id),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] == null && widget.plot == null)
@@ -115,7 +115,7 @@ class WaterTipsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.waterTips)),
       body: AsyncBody<dynamic>(
-        load: () => api.get('/water-tips', query: {if (plot != null) 'plot_id': plot!.id}),
+        load: () => api.waterTips(plotId: plot?.id),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] == null && plot == null)
@@ -140,7 +140,7 @@ class MarketScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.market)),
       body: AsyncBody<dynamic>(
-        load: () => api.get('/plots/${plot.id}/market'),
+        load: () => api.market(plot.id),
         builder: (_, d) => ListView(padding: const EdgeInsets.all(16), children: [
           ...personalizedAdviceCards(context, d['personalized']),
           if (d['personalized'] != null) Text(t.generalInformation, style: Theme.of(context).textTheme.titleMedium),

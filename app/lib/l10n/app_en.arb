@@ -64,5 +64,10 @@
   "language": "Language",
   "retry": "Try again",
   "loadFailed": "Could not load. Check your connection.",
-  "openOfficialSite": "Open official site"
+  "openOfficialSite": "Open official site",
+  "deleteMyData": "Delete my data",
+  "deleteMyDataBody": "This permanently deletes your plots, soil records and profile from our servers. It cannot be undone.",
+  "cancel": "Cancel",
+  "deleteConfirm": "Delete",
+  "dataDeleted": "Your data has been deleted."
 }

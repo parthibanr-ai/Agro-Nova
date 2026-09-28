@@ -62,5 +62,10 @@
   "language": "语言",
   "retry": "重试",
   "loadFailed": "加载失败，请检查网络。",
-  "openOfficialSite": "打开官方网站"
+  "openOfficialSite": "打开官方网站",
+  "deleteMyData": "删除我的数据",
+  "deleteMyDataBody": "这将从我们的服务器永久删除您的地块、土壤记录和个人资料，且无法撤销。",
+  "cancel": "取消",
+  "deleteConfirm": "删除",
+  "dataDeleted": "您的数据已删除。"
 }

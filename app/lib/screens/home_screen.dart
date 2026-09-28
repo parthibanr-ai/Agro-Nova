@@ -11,6 +11,35 @@ import 'info_screens.dart';
 import 'plot_capture_screen.dart';
 import 'soil_screen.dart';
 
+/// Asks first, then erases the farmer's data on the server (the right to erasure).
+Future<void> _confirmDelete(BuildContext context) async {
+  final t = AppLocalizations.of(context);
+  final state = context.read<AppState>();
+  final messenger = ScaffoldMessenger.of(context);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(t.deleteMyData),
+      content: Text(t.deleteMyDataBody),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.cancel)),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(t.deleteConfirm),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  try {
+    await state.deleteAccount();
+    messenger.showSnackBar(SnackBar(content: Text(t.dataDeleted)));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+  }
+}
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -46,6 +75,18 @@ class HomeScreen extends StatelessWidget {
             itemBuilder: (_) => [
               for (final l in supportedAgriLanguages)
                 CheckedPopupMenuItem(value: l.code, checked: l.code == s.language, child: Text(l.native)),
+            ],
+          ),
+          PopupMenuButton<String>(
+            onSelected: (_) => _confirmDelete(context),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'delete',
+                child: ListTile(
+                    leading: const Icon(Icons.delete_forever_outlined),
+                    title: Text(t.deleteMyData),
+                    contentPadding: EdgeInsets.zero),
+              ),
             ],
           ),
         ],

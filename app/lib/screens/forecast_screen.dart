@@ -16,7 +16,7 @@ class ForecastScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.forecast)),
       body: AsyncBody<dynamic>(
-        load: () => api.get('/plots/${plot.id}/forecast', query: {'days': '10'}),
+        load: () => api.forecast(plot.id),
         builder: (context, d) {
           final enso = d['enso'];
           final obs = d['observed'];

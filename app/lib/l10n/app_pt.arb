@@ -62,5 +62,10 @@
   "language": "Idioma",
   "retry": "Tentar novamente",
   "loadFailed": "Não foi possível carregar. Verifique a conexão.",
-  "openOfficialSite": "Abrir site oficial"
+  "openOfficialSite": "Abrir site oficial",
+  "deleteMyData": "Excluir meus dados",
+  "deleteMyDataBody": "Isto exclui permanentemente seus talhões, registros de solo e perfil dos nossos servidores. Não é possível desfazer.",
+  "cancel": "Cancelar",
+  "deleteConfirm": "Excluir",
+  "dataDeleted": "Seus dados foram excluídos."
 }

@@ -16,7 +16,7 @@ class ApiException implements Exception {
 /// Thin client for the AgriN FastAPI backend. Every request carries `lang` so the server translates
 /// dynamic content (advice, remedies, schemes) into the farmer's language.
 class Api {
-  Api({String? baseUrl, this.devUser, this.tokenProvider})
+  Api({String? baseUrl, this.devUser, this.tokenProvider, this.appCheckTokenProvider})
       : baseUrl = baseUrl ??
             const String.fromEnvironment('API_BASE_URL',
                 defaultValue: kIsWeb ? 'http://localhost:8000' : 'http://10.0.2.2:8000');
@@ -34,12 +34,19 @@ class Api {
   final String baseUrl;
   final String? devUser; // AUTH_MODE=dev on the server
   final Future<String?> Function()? tokenProvider; // Firebase ID token in production
+  /// Firebase App Check token: proves the request comes from the genuine app, not a script (see the server's
+  /// APP_CHECK_MODE). Null when App Check is not set up.
+  final Future<String?> Function()? appCheckTokenProvider;
   String lang = 'en';
 
   Future<Map<String, String>> _headers({bool json = true}) async {
     final h = <String, String>{if (json) 'Content-Type': 'application/json'};
     final token = await tokenProvider?.call();
     if (token != null) h['Authorization'] = 'Bearer $token';
+    try {
+      final appCheck = await appCheckTokenProvider?.call();
+      if (appCheck != null) h['X-Firebase-AppCheck'] = appCheck;
+    } catch (_) {} // no token: the server decides (it only refuses in enforce mode)
     if (devUser != null) h['X-Dev-User'] = devUser!;
     return h;
   }
@@ -94,8 +101,8 @@ class Api {
   Future<dynamic> put(String path, Map<String, dynamic> body) async => _decode(await _send(
       () async => http.put(_uri(path), headers: await _headers(), body: jsonEncode(body)), _writeTimeout));
 
-  Future<dynamic> delete(String path) async => _decode(
-      await _send(() async => http.delete(_uri(path), headers: await _headers()), _writeTimeout));
+  Future<dynamic> delete(String path, {Map<String, String>? query}) async => _decode(
+      await _send(() async => http.delete(_uri(path, query), headers: await _headers()), _writeTimeout));
 
   // ---- Slow AI requests run as server-side jobs -------------------------------------------------------------
   // The server answers at once with a job id (or with the finished answer, if it was already cached), and the
@@ -117,6 +124,38 @@ class Api {
         startTimeout: _writeTimeout,
         fallback: () => get('/plots/$plotId/crop-recommendation'),
       );
+
+  // The other slow screens work the same way. Each falls back to its direct GET on a server without job endpoints.
+  Future<dynamic> _jobOrGet(String jobPath, String directPath, [Map<String, String>? query]) => _runJob(
+        start: () async => http.post(_uri(jobPath, query), headers: await _headers()),
+        startTimeout: _writeTimeout,
+        fallback: () => get(directPath, query: query),
+      );
+
+  Future<dynamic> resilience({String? plotId}) => _jobOrGet(
+      '/resilience/jobs', '/resilience', {if (plotId != null) 'plot_id': plotId});
+
+  Future<dynamic> waterTips({String? plotId}) => _jobOrGet(
+      '/water-tips/jobs', '/water-tips', {if (plotId != null) 'plot_id': plotId});
+
+  Future<dynamic> market(String plotId) => _jobOrGet('/plots/$plotId/market/jobs', '/plots/$plotId/market');
+
+  Future<dynamic> forecast(String plotId, {int days = 10}) => _jobOrGet(
+      '/plots/$plotId/forecast/jobs', '/plots/$plotId/forecast', {'days': '$days'});
+
+  /// Jobs this phone is currently waiting for. When the app is sent to the background the server is asked to
+  /// push "your answer is ready" for each of them, so the farmer can leave and come back (see [notifyPendingJobs]).
+  final Set<String> _pendingJobs = {};
+
+  /// Ask the server to send a push notification when each job still being waited on finishes. Best effort: a
+  /// failure here only means no push.
+  Future<void> notifyPendingJobs() async {
+    for (final id in _pendingJobs.toList()) {
+      try {
+        await post('/jobs/$id/notify', const {});
+      } catch (_) {}
+    }
+  }
 
   Future<dynamic> diagnose(Uint8List bytes, String filename, {String? crop, String? plotId, String? notes}) async {
     Future<http.Response> send(String path) async {
@@ -152,17 +191,23 @@ class Api {
   /// direct endpoint would have produced, so screens handle one kind of error.
   Future<dynamic> _finishJob(Map<String, dynamic> view) async {
     final started = DateTime.now();
-    for (var attempt = 0;; attempt++) {
-      switch (view['status']) {
-        case 'done':
-          return view['result'];
-        case 'failed':
-          final e = (view['error'] as Map?) ?? const {};
-          throw ApiException((e['status'] as num?)?.toInt() ?? 500, (e['message'] as String?) ?? 'Request failed');
+    final jobId = view['job_id'] as String?;
+    try {
+      for (var attempt = 0;; attempt++) {
+        switch (view['status']) {
+          case 'done':
+            return view['result'];
+          case 'failed':
+            final e = (view['error'] as Map?) ?? const {};
+            throw ApiException((e['status'] as num?)?.toInt() ?? 500, (e['message'] as String?) ?? 'Request failed');
+        }
+        if (jobId != null) _pendingJobs.add(jobId);
+        if (DateTime.now().difference(started) > _pollBudget) throw ApiException(0, _slowMessage);
+        await Future<void>.delayed(pollDelay(attempt));
+        view = Map<String, dynamic>.from(await get('/jobs/${view['job_id']}') as Map);
       }
-      if (DateTime.now().difference(started) > _pollBudget) throw ApiException(0, _slowMessage);
-      await Future<void>.delayed(pollDelay(attempt));
-      view = Map<String, dynamic>.from(await get('/jobs/${view['job_id']}') as Map);
+    } finally {
+      if (jobId != null) _pendingJobs.remove(jobId);
     }
   }
 
