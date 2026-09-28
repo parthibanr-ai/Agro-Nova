@@ -61,7 +61,7 @@ cd D:\AgriN\app
 flutter run
 ```
 
-Pick `emulator-5554` if asked. The first build takes 5 to 10 minutes (Gradle downloads dependencies once); later runs take about a minute. While running, **r** hot-reloads, **R** restarts, **q** quits.
+Pick `emulator-5554` if asked. The first screen is the privacy notice (see section 7); nothing else works until you agree to the first point. The first build takes 5 to 10 minutes (Gradle downloads dependencies once); later runs take about a minute. While running, **r** hot-reloads, **R** restarts, **q** quits.
 
 The emulator reaches your PC at `http://10.0.2.2:8000`, which the app uses by default.
 
@@ -85,7 +85,7 @@ Debug builds allow plain `http://` to your PC (the debug manifest sets `usesClea
 |---|---|
 | Location | "Use my GPS" when capturing plot corners and soil-sample spots |
 | Camera | Taking a plant photo for diagnosis |
-| Notifications | Scheme, weather and market alerts (needs Firebase, see below) |
+| Notifications | "Your answer is ready" messages and scheme, weather and market alerts (needs Firebase, see below). The app asks only if you switch **Notifications** on the privacy screen. |
 
 If you deny one, use the corresponding alternative: tap the map instead of GPS, or pick a photo from the gallery.
 
@@ -96,6 +96,7 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 | Google Maps key | Get a key from Google Cloud Console > APIs & Services with **Maps SDK for Android** enabled, restricted to this app's package name (`in.agrin.agrin`) and SHA-1 fingerprint. Set it as the `MAPS_API_KEY` environment variable in the shell you run `flutter run`/`flutter build` from (e.g. `$env:MAPS_API_KEY="AIzaSy..."` in PowerShell, or `setx MAPS_API_KEY "AIzaSy..."` to keep it for new terminals; run `flutter clean` once if the old value was cached); `android/app/build.gradle.kts` injects it into the manifest at build time, so the key itself never lives in source control. | The plot-capture map. Without a working key the map area is blank or crashes with "API key not found". |
 | Firebase | Install the FlutterFire CLI and run `flutterfire configure` in `app/`; this adds `google-services.json`. | Login and push notifications. Without it the app uses `AUTH_MODE=dev` login. |
 | `API_BASE_URL` | `--dart-define=API_BASE_URL=...` on `flutter run` | Pointing at a different backend |
+| AI keys (backend) | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` in `backend/.env`; `LLM_ORDER` sets which is tried first (default OpenAI, then Anthropic, then Gemini) | Plant diagnosis, crop recommendation and personalised advice. One key is enough. |
 | Language labels | Hand-written for English, Hindi, Tamil, Portuguese, Russian, Chinese. For the rest set `TRANSLATE_API_KEY` in your shell, run `python tools/translate_arb.py`, then `flutter gen-l10n`. Have a native speaker review. | Fixed screen labels in other Indian languages |
 
 ## 7. Using the app
@@ -104,16 +105,16 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 2. **Add a plot:** tap **Add a plot**. Find the field either by typing a place name in the **Search a place** box above the map (results come from OpenStreetMap, with Google Geocoding as a fallback when `GOOGLE_MAPS_API_KEY` is set on the backend) or by scrolling/zooming manually. Then mark all four corners: tap the map at each corner (in walking order), stand at each corner and press the **GPS** button, or press the pin-with-pencil button to type a latitude/longitude directly. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid (crossing lines, wrong country) the message says what to fix.
 3. **Soil:** shows modelled public soil data and how to get your soil tested locally. Tap **Add soil sample** to enter values from a government or lab report; press GPS at the sampling spot to record its latitude and longitude.
 4. **Weather & climate outlook:** 10-day forecast, recent rainfall against normal, and advice specific to your crop and growth stage, including El Nino / La Nina effects.
-5. **Diagnose plant:** take a photo of the affected leaf (close, in daylight) or choose one from the gallery. You get the likely deficiency, pest or disease, a natural/organic remedy with preparation steps, and why organic beats chemical. Needs `GEMINI_API_KEY` on the backend.
+5. **Diagnose plant:** take a photo of the affected leaf (close, in daylight) or choose one from the gallery. You get the likely deficiency, pest or disease, a natural/organic remedy with preparation steps, and why organic beats chemical. Needs an AI key on the backend, and the **AI advice and plant photos** choice switched on.
 6. **Government schemes, Self-resilient farming (cow calculator), Save water, Value addition & market:** open from the home screen.
 
 The advice screens can take several seconds the first time. You can leave the app while one is being prepared: if you have allowed notifications you get a message when it is ready.
 
-**Your privacy:** the first time you open the app it shows how your data is used and asks what you allow. Only the first choice (your plots and farm details) is needed to use the app; AI advice and notifications are separate choices and are off until you switch them on. You can change any choice later from the menu (three dots, top right) under **Privacy and my data**, where you can also **download** everything we hold about you or **Delete my data** (permanent, no undo).
+**Your privacy:** the first time you open the app it shows how your data is used, who else receives it, how long it is kept and who to complain to, and asks what you allow. Only the first choice (your plots and farm details) is needed to use the app; **AI advice and plant photos** and **Notifications** are separate choices and are off until you switch them on. If you did not allow AI advice, plant diagnosis and the advice screens tell you consent is needed and show the privacy screen again. You can change any choice later from the menu (three dots, top right) under **Privacy and my data**, where you can also **download** everything we hold about you or **Delete my data** (permanent, no undo).
 
-**No signal:** the app shows the answers it saved last time, with a banner at the bottom saying so. A plot you draw or a soil sample you enter is kept on your phone and marked "waiting to send" until the connection returns; then it is sent by itself (or tap **Send now**). Photo diagnosis and new AI advice need a connection.
+**No signal:** the app shows the answers it saved last time (the most recent 40, on your phone), with an amber banner at the bottom saying so. A plot you draw or a soil sample you enter is kept on your phone and marked "waiting to send" until the connection returns; then it is sent by itself (or tap **Send now**). Photo diagnosis and new AI advice need a connection.
 
-**Notifications:** when an answer you asked for is ready, tapping the notification opens it directly.
+**Notifications:** if you leave the app while an answer is being prepared, you get a message when it is ready, and tapping it opens that answer directly (if it is more than about an hour old the screen asks again). Deleting your data also clears what the phone saved.
 
 Advice is a guide, not a certified diagnosis. For serious problems consult your local Krishi Vigyan Kendra or agriculture officer.
 
@@ -138,7 +139,11 @@ The file is `app\build\app\outputs\flutter-apk\app-release.apk`. For the Play St
 | Emulator shows only the wallpaper | The app is not running yet. Check the `flutter run` terminal, or swipe up on the phone and open **Agro Nova** |
 | Map is blank | Add the Google Maps key (section 6) |
 | GPS button does nothing on the emulator | Set a location: emulator side panel **...** > Location > Set location |
-| Diagnosis returns 503 | Set `GEMINI_API_KEY` in `backend/.env` and restart the backend |
+| Diagnosis returns 503 | Set at least one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` in `backend/.env` and restart the backend |
+| A screen says "Consent required" and the privacy screen appears | You have not allowed that purpose (for example AI advice). Switch it on and tap **I agree and continue** (from the menu page the button is **Save my choices**). If the notice changed, read it and agree again. |
+| Amber banner "No connection" stays after Wi-Fi is back | Tap **Send now**, or open any screen; the banner clears with the next successful request. Changes still waiting show a count. |
+| A saved plot never leaves "waiting to send" | Check the backend is reachable at `API_BASE_URL`. If the server refuses it (for example the shape is invalid) the banner says so and the plot is dropped: draw it again. |
+| Tapping a "ready" notification opens only the home screen | The answer expired (about an hour) or the plot was deleted; open the screen from the home list. Notifications need Firebase set up. |
 | Advice not translated | Set `TRANSLATE_API_KEY` |
 | Licences not accepted | `flutter doctor --android-licenses`, answer `y` |
 

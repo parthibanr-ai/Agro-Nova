@@ -5,13 +5,16 @@
 ```
 Flutter (Android / iOS / Web)  --HTTPS+Firebase ID token-->  FastAPI on Cloud Run
    Google Maps, GPS, camera                                    |-- Earth Engine (satellite/climate)
-   Firebase Auth, FCM                                          |-- Gemini (plant diagnosis)
-   ARB UI strings (26 langs)                                   |-- Cloud Translation (dynamic content)
-                                                               |-- NOAA CPC ONI (El Nino/La Nina)
-                                                               |-- ISRIC SoilGrids, Open-Meteo (keyless fallbacks)
-                                                               |-- Postgres (Cloud SQL) / SQLite: users, plots, soil, jobs
-                                                               |-- in-process caches, AI job workers, push fan-out tasks
-Earth Engine --batch--> BigQuery --> Vertex AI / BigQuery ML (seasonal outlook model, phase 2)
+   Firebase Auth, FCM, App Check                               |-- LLMs in order OpenAI -> Anthropic -> Gemini
+   ARB UI strings (26 langs)                                   |-- Cloud Translation (fixed text)
+   Saved answers + offline write queue (on the phone)          |-- NOAA CPC ONI (El Nino/La Nina)
+   Privacy notice + consent screen                             |-- ISRIC SoilGrids, Open-Meteo (keyless fallbacks)
+                                                               |-- Postgres (Cloud SQL) / SQLite: users, plots, soil,
+                                                               |     consent history, jobs, nightly satellite snapshots
+                                                               |-- Redis (optional): shared caches, rate limits, locks
+                                                               |-- Cloud Tasks (optional): AI jobs and push fan-out
+                                                               |-- /metrics -> Prometheus -> Grafana, alerts (ops/)
+Earth Engine --nightly batch--> climate_snapshots (API reads a row) and BigQuery --> Vertex AI (seasonal model, phase 2)
 ```
 
 The backend follows the pattern from `D:\Hydro_sensing`: a swappable provider registry
@@ -38,7 +41,7 @@ and the report `features` are the hook for an ML model in Vertex AI trained on t
 (`countries.json -> enso_impact`); crop sensitivity is data (`crops.json`). Advisory severity = crop
 sensitivity, downgraded for weak events. It is a seasonal tendency, and says so.
 
-**Plant diagnosis.** Gemini classifies the photo, constrained to the ids in `remedies.json`. The remedy,
+**Plant diagnosis.** A vision model (whichever vendor in `LLM_ORDER` answers first) classifies the photo, constrained to the ids in `remedies.json`. The remedy,
 preparation, prevention and the "why organic vs. chemical" text come from the curated KB, never from the
 model, so advice stays organic-first and consistent. Low confidence returns "retake the photo / see your KVK".
 
@@ -52,11 +55,37 @@ localises it once and sends it 500 devices per FCM call; run it from Cloud Sched
 manure self-sufficiency of the plot), an integrated-farming roadmap, water tips prioritised by crop and
 ENSO state, and per-crop value-addition ideas with market channels per country.
 
+**Model vendors.** Every AI call goes through `services/gemini_client.py`. `LLM_ORDER` (default `openai,anthropic,gemini`)
+lists the vendors to try; the first that answers wins, and a vendor with no key is skipped, so a deployment with only a Gemini
+key behaves as before. Any failure (overload, exhausted quota, timeout, a reply that is not JSON) moves to the next vendor.
+OpenAI and Anthropic are called over plain HTTP, get the plant photo in their own image format, and each has a circuit breaker
+like the Gemini models, so a vendor that is down costs one wasted call, not one per request. A Gemini 429 (quota exhausted)
+moves straight to the next model instead of retrying. Which vendor answered is visible in `agrin_gemini_calls_total{model=...}`.
+
+**Privacy and consent (DPDP).** The app shows a versioned privacy notice (`data/privacy_notice.json`, served and translated by the
+API) before anything else, and records one choice per purpose: `service` (plots and farm details, required), `ai` (plot conditions
+and photos sent to the AI vendors) and `notifications` (device token). Nothing is pre-ticked; the choices can be changed or
+withdrawn from "Privacy and my data", which also offers the data download and erasure. Current choices live on the user row,
+every change is an append-only `consent_events` row, and both go with the export and the erasure. `CONSENT_MODE`
+(`off`, `monitor`, `enforce`) decides whether the server refuses plot and soil writes, AI features and push registration
+without the matching consent. Changing the notice's meaning means bumping its version, which asks every farmer again.
+`python -m app.batch.retention` erases accounts unused for `RETENTION_DAYS` (`users.last_seen_at`).
+
+**Offline and notifications.** The app remembers the last answers it saw (bounded, on the phone, per language) and shows them,
+with a banner, when the server cannot be reached. Plots and soil samples made offline are queued on the phone with a
+`client_ref`; the server returns the record it already has for a repeated `client_ref`, so a retry never duplicates. The queue
+sends on a timer, on returning to the app and when the connection comes back, stops at the first sign of no connection, and drops
+a change the server refuses for good. AI answers are not queued (they need the server). The "answer ready" push carries
+`job_id`, `kind` and `plot_id`; tapping it opens that screen with the finished result, or asks afresh if the server no longer
+holds it (results are kept about an hour).
+
 ## 3. Languages
 
 Static UI: ARB files (`app/lib/l10n`), generated by `flutter gen-l10n`. Hand-written: en, hi, ta, pt, ru, zh;
-the rest via `tools/translate_arb.py`. Dynamic content: a middleware translates all human-readable strings
-in any JSON response to `?lang=` using Cloud Translation, skipping ids/urls/dates, caching per string.
+the rest via `tools/translate_arb.py`. Dynamic content: for the widely used languages the AI vendor writes advice directly in
+the farmer's language (marked in the response so it is not translated twice); a middleware translates all other human-readable
+strings in any JSON response to `?lang=` using Cloud Translation, skipping ids/urls/dates, caching per string. The privacy notice
+is translated this way, and its translations need native-speaker and legal review.
 Bodo, Kashmiri, Sanskrit and Santali are flagged `machine_translation=false` and fall back to Hindi/Urdu
 until Cloud Translation coverage is verified. Urdu, Sindhi and Kashmiri render right-to-left.
 
@@ -112,9 +141,11 @@ farmers in the same area. What each layer does:
   (`services/notifications.py`, `services/tasks.py`)
 - **The schema is migrated, not recreated** (`migrations/`, Alembic). SQLite migrates itself at start-up; Postgres
   runs `python -m app.migrate` once per release. A test fails if the models and migrations disagree.
-- **Limits and visibility.** Per-farmer and per-IP rate limits on Gemini-backed endpoints; Prometheus metrics at
+- **Limits and visibility.** Per-farmer and per-IP rate limits on AI endpoints; Prometheus metrics at
   `/metrics`; request ids on every log line; liveness and readiness probes; alert rules and runbooks in
-  [OPERATIONS.md](OPERATIONS.md); a CI gate that fails if a change makes more upstream calls per farmer.
+  [OPERATIONS.md](OPERATIONS.md); a CI gate that fails if a change makes more upstream calls per farmer. `ops/monitoring/` is a
+  Docker Compose stack (Prometheus with the alert rules, Grafana with a ready dashboard: which vendor answers, slowest routes,
+  jobs, caches, queue, database connections) for watching a local or staging API.
 
 **What is still open for a national rollout.** The shared store, the queues, the nightly satellite job and App Check
 are built and tested, but Cloud Tasks, Cloud Storage, BigQuery and App Check have only been exercised against
@@ -130,5 +161,5 @@ this has been load-tested at national volume; `loadtest/k6_farmers.js` is the to
 
 1. Now: this repo (backend and Flutter client tested; not yet deployed anywhere).
 2. Wire Firebase and Maps keys, deploy a staging environment to Cloud Run, run the load test and the queue/App Check checks there.
-3. Scheme sync job, voice input/output for low-literacy users.
+3. Scheme sync job, voice input/output for low-literacy users, a faster weather-history source, DPDP legal sign-off.
 4. Vertex AI seasonal model from BigQuery climatology; Bhuvan/national providers per country.
