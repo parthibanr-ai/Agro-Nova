@@ -4,6 +4,9 @@ python-multipart>=0.0.9
 pydantic>=2.7
 pydantic-settings>=2.3
 sqlalchemy>=2.0
+alembic>=1.13              # schema migrations (migrations/)
+psycopg[binary]>=3.2      # Postgres driver: DATABASE_URL=postgresql+psycopg://...
+prometheus-client>=0.20   # /metrics
 shapely>=2.0
 pyproj>=3.6
 httpx>=0.27

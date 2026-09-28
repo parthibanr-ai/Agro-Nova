@@ -6,9 +6,41 @@ Shared by the [mobile](user_manual_mobile.md) and [web](user_manual_web.md) manu
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./agrin.db` | Where plots and soil samples are stored. SQLite is a local file. For production use Postgres (add the driver to requirements), e.g. `postgresql+psycopg://user:pass@host/agrin`. |
+| `DATABASE_URL` | `sqlite:///./agrin.db` | Where plots and soil samples are stored. SQLite is a local file. For production use Postgres (the driver is included), e.g. `postgresql://user:pass@host/agrin`; the plain `postgres://` and `postgresql://` forms that hosting providers hand out are accepted. |
+| `AUTO_MIGRATE` | on for SQLite, off for Postgres | Whether the app applies database migrations when it starts. For Postgres, run `python -m app.migrate` once per release instead (see "Database migrations" below). |
+| `DB_PGBOUNCER` | `false` | Set `true` when a PgBouncer in transaction mode sits in front of Postgres (turns off server-side prepared statements, which it cannot support). |
 | `CORS_ORIGINS` | `http://localhost:8080,http://localhost:5173` | Web addresses allowed to call the API from a browser. **Web app only** (the Android app is not a browser and ignores it). Add your deployed web address here. |
 | `DEFAULT_COUNTRY` | `IN` | Country given to a new user until they choose one: `IN`, `BR`, `RU` or `CN`. |
+
+## Database migrations
+
+The schema is managed with Alembic (`backend/migrations/`). Each change is a numbered migration, so a live database can be upgraded without losing data.
+
+- **Local / SQLite:** nothing to do. The app upgrades the database when it starts, and adopts a database created by an older version.
+- **Postgres / production:** run the migration once per release, before starting the new instances, and start the instances with `AUTO_MIGRATE=false` (the default for Postgres) so a fleet never migrates at the same time:
+  ```powershell
+  cd backend
+  .venv\Scripts\python -m app.migrate
+  ```
+  With the Docker image: `docker run --rm -e DATABASE_URL=... <image> python -m app.migrate` (on Cloud Run, make this a Cloud Run job that runs before each deploy).
+- **Making a schema change:** edit `app/models.py`, then `alembic revision -m "what changed"` in `backend/`, fill in `upgrade()` and `downgrade()`, and run the tests. `tests/test_migrations.py` fails if the models and the migrations disagree.
+- **Try it on a real Postgres:** `TEST_POSTGRES_URL=postgresql://user:pass@localhost:5544/scratch_db` makes `tests/test_migrations.py` and `tests/test_jobs.py` also run against that database (**it drops and recreates the `public` schema, so use a scratch database**).
+
+## Slow AI requests (jobs)
+
+Crop recommendation and photo diagnosis can take from one second to over half a minute. The app now starts them as jobs (`POST .../crop-recommendation/jobs`, `POST /diagnosis/jobs`): the server answers at once, or within `JOB_FAST_WAIT_S` if the result is cached, and the app polls `GET /jobs/{id}`. The original endpoints still work for older app versions.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `JOB_WORKERS` | `8` | Worker threads per instance. |
+| `JOB_QUEUE_MAX` | `500` | Unfinished jobs an instance accepts before answering `503` with `Retry-After`. |
+| `JOB_FAST_WAIT_S` | `2.0` | How long a start request waits for a quick answer before replying `202 Accepted`. |
+| `JOB_TTL_S` | `3600` | How long finished jobs stay available for polling, then they are purged (also `POST /api/v1/admin/jobs/purge` for a scheduler). |
+| `JOB_LEASE_S` | `180` | A job unfinished after this long is presumed lost (its instance died) and is marked failed, so the app can retry. |
+| `GEMINI_MAX_CONCURRENCY` | `16` | Gemini calls in flight per instance. Keep instances x this value inside your Gemini quota. |
+| `GEMINI_QUEUE_TIMEOUT_S` | `15` | How long a request waits for a Gemini slot before being told it is busy. |
+
+Photos sent for diagnosis are held in memory only while the job runs; they are never written to the database.
 
 ## Capacity, caching and limits
 

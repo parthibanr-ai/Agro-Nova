@@ -12,6 +12,7 @@ class PlotCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     country: str = Field("IN", min_length=2, max_length=2)
     state: str | None = None
+    district: str | None = Field(None, max_length=80)
     crop: str
     sowing_date: date | None = None
     corners: list[Corner] = Field(min_length=4, max_length=12, description="Boundary corners in walking order")

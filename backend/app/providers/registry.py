@@ -5,6 +5,7 @@ from datetime import date
 from app.core.cache import TTLCache
 from app.core.config import get_settings
 from app.core.gee_auth import is_earth_engine_ready
+from app.domain.grid import CELL_DEG, snap as _snap
 from app.providers.base import ClimateProvider, ObservedClimate
 from app.providers.gee_provider import GEEProvider
 from app.providers.open_meteo import OpenMeteoProvider
@@ -18,17 +19,12 @@ MAX_RAIN_LAG_DAYS = 7
 
 # Rain and weather products are 5-25 km wide, so every farm inside one 0.05 degree (~5.5 km) cell gets the same
 # answer. Sharing one lookup per cell per day is what lets thousands of farmers share a few upstream calls.
-CELL_DEG = 0.05
 _EE_FAILURE_TTL_S = 300  # a broken Earth Engine is not retried by every request, only every few minutes
 _FAILED = object()
 
 _satellite_cache = TTLCache("satellite-plot", max_entries=20_000)  # per plot: NDVI is plot-resolution
 _weather_cache = TTLCache("weather-cell", max_entries=50_000)
 _forecast_cache = TTLCache("forecast-cell", max_entries=50_000)
-
-
-def _snap(v: float) -> float:
-    return round(round(v / CELL_DEG) * CELL_DEG, 4)
 
 
 def _plot_key(corners) -> tuple:

@@ -9,6 +9,7 @@ from app.core.ratelimit import limit
 from app.core.gee_auth import earth_engine_init_error, is_earth_engine_ready
 from app.core.languages import LANGUAGES, get_language
 from app.db import get_db
+from app.domain.grid import cell_id
 from app.domain.polygon import PolygonValidationError, centroid, polygon_area_m2, validate_plot
 from app.models import Plot, SoilSample, User
 from app.providers.base import ObservedClimate
@@ -42,7 +43,7 @@ def _plot_or_404(db: Session, user: User, plot_id: str) -> Plot:
 
 def _plot_json(p: Plot) -> dict:
     return {
-        "id": p.id, "name": p.name, "country": p.country, "state": p.state, "crop": p.crop,
+        "id": p.id, "name": p.name, "country": p.country, "state": p.state, "district": p.district, "crop": p.crop,
         "sowing_date": p.sowing_date.isoformat() if p.sowing_date else None,
         "corners": p.corners, "area_m2": round(p.area_m2, 1), "area_acres": round(p.area_m2 / 4046.856, 2),
         "area_ha": round(p.area_m2 / 10_000, 3),
@@ -129,7 +130,7 @@ def create_plot(body: PlotCreate, user: User = Depends(current_user), db: Sessio
     clat, clon = centroid(points)
     plot = Plot(
         owner_uid=user.uid, name=body.name, country=body.country.upper(), state=body.state or user.state,
-        crop=body.crop, sowing_date=body.sowing_date, corners=[c.model_dump() for c in body.corners],
+        district=body.district, cell_id=cell_id(clat, clon), crop=body.crop, sowing_date=body.sowing_date, corners=[c.model_dump() for c in body.corners],
         area_m2=polygon_area_m2(points), centroid_lat=clat, centroid_lon=clon,
     )
     db.add(plot)
@@ -251,17 +252,29 @@ def diagnose_plant(
 ) -> dict:
     # A plain `def` route runs in FastAPI's worker-thread pool, so the slow, blocking Gemini call below cannot
     # stall the event loop that every other request depends on.
+    data = read_photo(image)
+    return run_diagnosis(db, user, data, image.content_type, crop, notes, plot_id)
+
+
+def read_photo(image: UploadFile) -> bytes:
+    """Validate and read an uploaded photo (type and size limits shared by the direct and job endpoints)."""
     if image.content_type not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(415, "Upload a JPEG, PNG or WebP photo")
     data = image.file.read(MAX_IMAGE_BYTES + 1)
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Photo is larger than 8 MB")
+    return data
+
+
+def run_diagnosis(db: Session, user: User, data: bytes, content_type: str, crop: str | None, notes: str | None,
+                  plot_id: str | None) -> dict:
+    """Analyse one photo. Used by the direct endpoint and by the diagnosis job worker."""
     if plot_id:
         crop = crop or _plot_or_404(db, user, plot_id).crop
     country = user.country
     _release_db(db)
     try:
-        return diagnosis.diagnose(data, image.content_type, crop, country, notes)
+        return diagnosis.diagnose(data, content_type, crop, country, notes)
     except diagnosis.DiagnosisUnavailable as e:
         raise HTTPException(503, str(e)) from e
     except Exception as e:  # noqa: BLE001

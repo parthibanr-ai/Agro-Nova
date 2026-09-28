@@ -1,0 +1,10 @@
+# Keep the build context small and keep secrets out of it.
+.venv/
+**/__pycache__/
+.pytest_cache/
+tests/
+.env
+.env.*
+!.env.example
+secrets/
+*.db

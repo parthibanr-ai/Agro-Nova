@@ -97,15 +97,81 @@ class Api {
   Future<dynamic> delete(String path) async => _decode(
       await _send(() async => http.delete(_uri(path), headers: await _headers()), _writeTimeout));
 
+  // ---- Slow AI requests run as server-side jobs -------------------------------------------------------------
+  // The server answers at once with a job id (or with the finished answer, if it was already cached), and the
+  // phone polls a cheap status endpoint. That keeps one slow Gemini call from tying up a connection on a weak
+  // network, and lets the server absorb a burst by queueing instead of timing out.
+
+  static const _pollBudget = Duration(seconds: 120);
+
+  /// Wait before poll number [attempt]: 1 s, 1.5 s, 2 s ... capped at 3 s, plus jitter so phones do not poll in step.
+  Duration Function(int attempt) pollDelay = (attempt) {
+    final ms = min(3000, 1000 + attempt * 500);
+    return Duration(milliseconds: ms + Random().nextInt(300));
+  };
+
+  /// Crop recommendation for a plot. Uses the job endpoints; an older server without them is served by the
+  /// direct endpoint instead.
+  Future<dynamic> cropRecommendation(String plotId) => _runJob(
+        start: () async => http.post(_uri('/plots/$plotId/crop-recommendation/jobs'), headers: await _headers()),
+        startTimeout: _writeTimeout,
+        fallback: () => get('/plots/$plotId/crop-recommendation'),
+      );
+
   Future<dynamic> diagnose(Uint8List bytes, String filename, {String? crop, String? plotId, String? notes}) async {
-    final req = http.MultipartRequest('POST', _uri('/diagnosis'))
-      ..headers.addAll(await _headers(json: false))
-      ..files.add(http.MultipartFile.fromBytes('image', bytes,
-          filename: filename,
-          contentType: MediaType('image', filename.toLowerCase().endsWith('png') ? 'png' : 'jpeg')));
-    if (crop != null) req.fields['crop'] = crop;
-    if (plotId != null) req.fields['plot_id'] = plotId;
-    if (notes != null) req.fields['notes'] = notes;
-    return _decode(await _send(() async => http.Response.fromStream(await req.send()), _uploadTimeout));
+    Future<http.Response> send(String path) async {
+      final req = http.MultipartRequest('POST', _uri(path))
+        ..headers.addAll(await _headers(json: false))
+        ..files.add(http.MultipartFile.fromBytes('image', bytes,
+            filename: filename,
+            contentType: MediaType('image', filename.toLowerCase().endsWith('png') ? 'png' : 'jpeg')));
+      if (crop != null) req.fields['crop'] = crop;
+      if (plotId != null) req.fields['plot_id'] = plotId;
+      if (notes != null) req.fields['notes'] = notes;
+      return http.Response.fromStream(await req.send());
+    }
+
+    return _runJob(
+      start: () => send('/diagnosis/jobs'),
+      startTimeout: _uploadTimeout,
+      fallback: () async => _decode(await _send(() => send('/diagnosis'), _uploadTimeout)),
+    );
+  }
+
+  Future<dynamic> _runJob({
+    required Future<http.Response> Function() start,
+    required Duration startTimeout,
+    required Future<dynamic> Function() fallback,
+  }) async {
+    final r = await _send(start, startTimeout);
+    if (r.statusCode == 404 && _detail(r) == 'Not Found') return fallback(); // server predates the job endpoints
+    return _finishJob(Map<String, dynamic>.from(_decode(r) as Map));
+  }
+
+  /// Polls until the job is done. A failed job becomes an [ApiException] with the same status and message the
+  /// direct endpoint would have produced, so screens handle one kind of error.
+  Future<dynamic> _finishJob(Map<String, dynamic> view) async {
+    final started = DateTime.now();
+    for (var attempt = 0;; attempt++) {
+      switch (view['status']) {
+        case 'done':
+          return view['result'];
+        case 'failed':
+          final e = (view['error'] as Map?) ?? const {};
+          throw ApiException((e['status'] as num?)?.toInt() ?? 500, (e['message'] as String?) ?? 'Request failed');
+      }
+      if (DateTime.now().difference(started) > _pollBudget) throw ApiException(0, _slowMessage);
+      await Future<void>.delayed(pollDelay(attempt));
+      view = Map<String, dynamic>.from(await get('/jobs/${view['job_id']}') as Map);
+    }
+  }
+
+  String? _detail(http.Response r) {
+    try {
+      final d = jsonDecode(utf8.decode(r.bodyBytes))['detail'];
+      return d is String ? d : null;
+    } catch (_) {
+      return null;
+    }
   }
 }

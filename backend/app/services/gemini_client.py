@@ -37,14 +37,18 @@ _client = None
 _client_key: tuple | None = None
 _failures: dict[str, int] = {}  # model -> consecutive retryable failures
 _open_until: dict[str, float] = {}  # model -> monotonic time the breaker closes
+_slots: threading.BoundedSemaphore | None = None
+_slots_size = 0
 
 
 def reset_state() -> None:
-    """Forget the cached client and breaker state (used by tests and after config changes)."""
-    global _client, _client_key
+    """Forget the cached client, breaker state and concurrency slots (tests, and after config changes)."""
+    global _client, _client_key, _slots, _slots_size
     with _lock:
         _client = None
         _client_key = None
+        _slots = None
+        _slots_size = 0
         _failures.clear()
         _open_until.clear()
 
@@ -88,10 +92,33 @@ def _record_failure(model: str) -> None:
             logger.warning("Gemini %s paused for %.0fs after %d consecutive failures", model, BREAKER_COOLDOWN_S, n)
 
 
+def _get_slots(size: int) -> threading.BoundedSemaphore:
+    global _slots, _slots_size
+    with _lock:
+        if _slots is None or _slots_size != size:
+            _slots, _slots_size = threading.BoundedSemaphore(max(1, size)), size
+        return _slots
+
+
 def generate_json(contents: list, temperature: float) -> dict:
+    """Call Gemini, holding one of GEMINI_MAX_CONCURRENCY slots for the whole attempt sequence.
+
+    The slot cap keeps one instance inside its share of the project quota however many requests arrive; a request
+    that cannot get a slot within GEMINI_QUEUE_TIMEOUT_S is told Gemini is busy instead of piling up threads.
+    """
+    s = get_settings()
+    slots = _get_slots(s.gemini_max_concurrency)
+    if not slots.acquire(timeout=s.gemini_queue_timeout_s):
+        raise GeminiUnavailable("Gemini is busy right now. Please try again shortly.")
+    try:
+        return _generate(contents, temperature, s)
+    finally:
+        slots.release()
+
+
+def _generate(contents: list, temperature: float, s) -> dict:
     from google.genai import errors, types
 
-    s = get_settings()
     client = _get_client(s)
     config = types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature)
 

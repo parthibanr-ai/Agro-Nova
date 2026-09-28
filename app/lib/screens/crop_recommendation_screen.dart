@@ -27,7 +27,7 @@ class CropRecommendationScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(t.cropRecommendation)),
       body: AsyncBody<dynamic>(
-        load: () => api.get('/plots/${plot.id}/crop-recommendation'),
+        load: () => api.cropRecommendation(plot.id),
         builder: (context, d) {
           final season = d['target_season'];
           final recs = d['recommendations'] as List;
