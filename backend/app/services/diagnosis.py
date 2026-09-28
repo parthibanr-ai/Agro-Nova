@@ -9,6 +9,7 @@ import json
 import logging
 
 from app.core.config import get_settings
+from app.services import gemini_client
 from app.services import knowledge
 
 logger = logging.getLogger(__name__)
@@ -43,19 +44,9 @@ def call_gemini(image: bytes, mime_type: str, prompt: str) -> dict:
     s = get_settings()
     if not s.gemini_api_key and not s.gemini_use_vertex:
         raise DiagnosisUnavailable("Set GEMINI_API_KEY (or GEMINI_USE_VERTEX=true with GCP credentials).")
-    from google import genai
     from google.genai import types
 
-    if s.gemini_use_vertex:
-        client = genai.Client(vertexai=True, project=s.gee_cloud_project, location=s.gcp_location)
-    else:
-        client = genai.Client(api_key=s.gemini_api_key)
-    resp = client.models.generate_content(
-        model=s.gemini_model,
-        contents=[types.Part.from_bytes(data=image, mime_type=mime_type), prompt],
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
-    )
-    return json.loads(resp.text)
+    return gemini_client.generate_json([types.Part.from_bytes(data=image, mime_type=mime_type), prompt], temperature=0.2)
 
 
 def diagnose(image: bytes, mime_type: str, crop: str | None, country: str | None, notes: str | None,

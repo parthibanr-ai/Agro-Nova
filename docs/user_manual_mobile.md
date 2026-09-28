@@ -93,7 +93,7 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 
 | Item | How | Needed for |
 |---|---|---|
-| Google Maps key | Get a key from Google Cloud Console > APIs & Services with **Maps SDK for Android** enabled, restricted to this app's package name (`in.agrin.agrin`) and SHA-1 fingerprint. Set it as the `MAPS_API_KEY` environment variable in the shell you run `flutter run`/`flutter build` from (e.g. `$env:MAPS_API_KEY="AIzaSy..."` in PowerShell); `android/app/build.gradle.kts` injects it into the manifest at build time, so the key itself never lives in source control. | The plot-capture map. Without a working key the map area is blank or crashes with "API key not found". |
+| Google Maps key | Get a key from Google Cloud Console > APIs & Services with **Maps SDK for Android** enabled, restricted to this app's package name (`in.agrin.agrin`) and SHA-1 fingerprint. Set it as the `MAPS_API_KEY` environment variable in the shell you run `flutter run`/`flutter build` from (e.g. `$env:MAPS_API_KEY="AIzaSy..."` in PowerShell, or `setx MAPS_API_KEY "AIzaSy..."` to keep it for new terminals; run `flutter clean` once if the old value was cached); `android/app/build.gradle.kts` injects it into the manifest at build time, so the key itself never lives in source control. | The plot-capture map. Without a working key the map area is blank or crashes with "API key not found". |
 | Firebase | Install the FlutterFire CLI and run `flutterfire configure` in `app/`; this adds `google-services.json`. | Login and push notifications. Without it the app uses `AUTH_MODE=dev` login. |
 | `API_BASE_URL` | `--dart-define=API_BASE_URL=...` on `flutter run` | Pointing at a different backend |
 | Language labels | Hand-written for English, Hindi, Tamil, Portuguese, Russian, Chinese. For the rest set `TRANSLATE_API_KEY` in your shell, run `python tools/translate_arb.py`, then `flutter gen-l10n`. Have a native speaker review. | Fixed screen labels in other Indian languages |
@@ -101,7 +101,7 @@ If you deny one, use the corresponding alternative: tap the map instead of GPS, 
 ## 7. Using the app
 
 1. **Language:** tap the translate icon (top right) and pick a language.
-2. **Add a plot:** tap **Add a plot**. Find the field either by typing a place name in the **Search a place** box above the map (results come from OpenStreetMap, no key needed) or by scrolling/zooming manually. Then mark all four corners: tap the map at each corner (in walking order), stand at each corner and press the **GPS** button, or press the pin-with-pencil button to type a latitude/longitude directly. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid (crossing lines, wrong country) the message says what to fix.
+2. **Add a plot:** tap **Add a plot**. Find the field either by typing a place name in the **Search a place** box above the map (results come from OpenStreetMap, with Google Geocoding as a fallback when `GOOGLE_MAPS_API_KEY` is set on the backend) or by scrolling/zooming manually. Then mark all four corners: tap the map at each corner (in walking order), stand at each corner and press the **GPS** button, or press the pin-with-pencil button to type a latitude/longitude directly. Enter name, crop, country and sowing date, then **Save plot**. If the shape is invalid (crossing lines, wrong country) the message says what to fix.
 3. **Soil:** shows modelled public soil data and how to get your soil tested locally. Tap **Add soil sample** to enter values from a government or lab report; press GPS at the sampling spot to record its latitude and longitude.
 4. **Weather & climate outlook:** 10-day forecast, recent rainfall against normal, and advice specific to your crop and growth stage, including El Nino / La Nina effects.
 5. **Diagnose plant:** take a photo of the affected leaf (close, in daylight) or choose one from the gallery. You get the likely deficiency, pest or disease, a natural/organic remedy with preparation steps, and why organic beats chemical. Needs `GEMINI_API_KEY` on the backend.
@@ -137,6 +137,6 @@ The file is `app\build\app\outputs\flutter-apk\app-release.apk`. For the Play St
 ## 10. Tests
 
 ```powershell
-cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 33 tests
+cd D:\AgriN\backend; .venv\Scripts\python -m pytest     # backend, 45 tests
 cd D:\AgriN\app;     flutter analyze; flutter test       # app
 ```

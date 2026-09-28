@@ -218,6 +218,9 @@ def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user
         )
     except crop_recommendation.RecommendationUnavailable as e:
         raise HTTPException(503, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("crop recommendation failed")
+        raise HTTPException(502, "The recommendation service could not respond. Try again.") from e
     result["plot_id"] = plot.id
     return result
 

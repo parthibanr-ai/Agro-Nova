@@ -1,6 +1,6 @@
 # Backend settings reference (`backend/.env`)
 
-Shared by the [mobile](user_manual_mobile.md) and [web](user_manual_web.md) manuals. The backend reads `backend/.env`; **restart uvicorn after changing it**. `.env` holds secrets and is git-ignored; never commit it. Every value is optional for local development, and the app degrades gracefully.
+Shared by the [mobile](user_manual_mobile.md) and [web](user_manual_web.md) manuals. The backend reads `backend/.env`; **restart uvicorn after changing it**. A real environment variable with the same name (for example a Windows user variable `GEMINI_API_KEY`) **overrides** `.env`, so if a key you just pasted is "invalid", check `echo $env:GEMINI_API_KEY` for a stale value. `.env` holds secrets and is git-ignored; never commit it. Every value is optional for local development, and the app degrades gracefully.
 
 ## Core
 
@@ -15,7 +15,7 @@ Shared by the [mobile](user_manual_mobile.md) and [web](user_manual_web.md) manu
 | Setting | Meaning |
 |---|---|
 | `AUTH_MODE` | `dev`: the backend trusts an `X-Dev-User` header, so any name counts as logged in. The app sends `dev-farmer`. Local testing only; anyone who can reach the server can impersonate anyone. `firebase`: farmers sign in with Firebase Authentication and the backend verifies their signed token. Use in production. |
-| `FIREBASE_CREDENTIALS_PATH` | Used when `AUTH_MODE=firebase` and for push notifications. Path to the service-account JSON key from Firebase (Project settings > Service accounts). Keep it in `backend/secrets/` (git-ignored). |
+| `FIREBASE_CREDENTIALS_PATH` | Used when `AUTH_MODE=firebase` and for push notifications. Path to the service-account JSON key from Firebase (Project settings > Service accounts). Firebase Authentication is not a separate API in the Library: add Firebase to your Cloud project at console.firebase.google.com, then Build > Authentication > Get started and enable **Anonymous** sign-in (the app signs in anonymously). Enabling it turns on the Identity Toolkit API, which must also be allowed on any API key the client uses. Keep it in `backend/secrets/` (git-ignored). |
 | `ADMIN_API_KEY` | Password for `POST /api/v1/admin/notifications/dispatch`, which sends scheme, weather and market push notifications. A scheduler calls it with header `X-API-Key: <value>`. Replace `change-me` with a long random string before deploying: `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
 
 ## Google Earth Engine (satellite data)
@@ -30,13 +30,14 @@ Without it, weather and rainfall history come from Open-Meteo; you lose satellit
 
 **Local setup (`user` mode)**
 
-1. Register your project at https://code.earthengine.google.com/register (choose *Unpaid usage* for non-commercial, *Paid* for commercial) and make sure the **Google Earth Engine API** is enabled on it.
+1. Register your project at https://code.earthengine.google.com/register, or at `https://console.cloud.google.com/earth-engine/configuration?project=<your project id>` (choose *Unpaid usage* for non-commercial, *Paid* for commercial), and make sure the **Google Earth Engine API** is enabled on it. Enabling the API alone is not enough: the error "Project ... is not registered to use Earth Engine" means this registration step is missing.
 2. Install the library and log in once:
    ```powershell
    cd D:\AgriN\backend
    .venv\Scripts\pip install earthengine-api
    .venv\Scripts\earthengine authenticate
    ```
+   Log in with the Google account that owns (or has the **Service Usage Consumer** role on) the project. "Caller does not have required permission to use project ..." means the saved login is the wrong account; run `earthengine authenticate --force` and sign in again.
 3. In `.env`: `EE_AUTH_MODE=user` and `GEE_CLOUD_PROJECT=<your project id>`.
 4. Restart the backend and open http://localhost:8000/api/v1/health. `"earth_engine": true` means it works; otherwise `earth_engine_error` says why.
 
@@ -58,8 +59,9 @@ The first forecast with Earth Engine active can take 10 to 30 seconds. If Earth 
 
 | Setting | Meaning |
 |---|---|
-| `GEMINI_API_KEY` | Create at https://aistudio.google.com/apikey. Without it, `/diagnosis`, `/plots/{id}/crop-recommendation`, and the personalized sections of `/resilience`, `/water-tips` and `/plots/{id}/market` are unavailable; the rest of the app works. The free tier caps at 20 requests/day for `gemini-2.5-flash` - enable billing on the project to lift it. |
-| `GEMINI_MODEL` | Model to use (default `gemini-2.5-flash`). |
+| `GEMINI_API_KEY` | Create at https://aistudio.google.com/apikey (newer keys start with `AQ.`; older ones with `AIza`). It must belong to a project with credits or billing, otherwise every call fails with "prepayment credits are depleted". This key is separate from the Maps and Translation keys, whose API restrictions do not include Gemini. Without it, `/diagnosis`, `/plots/{id}/crop-recommendation`, and the personalized sections of `/resilience`, `/water-tips` and `/plots/{id}/market` are unavailable; the rest of the app works. The free tier has a low daily request cap - enable billing on the project to lift it. |
+| `GEMINI_MODEL` | Model to use (default `gemini-flash-latest`). Older models such as `gemini-2.5-flash` return 404 "no longer available to new users" on new keys. A temporary 503 "high demand" can occur; retry. |
+| `GEMINI_FALLBACK_MODEL` | Used when `GEMINI_MODEL` keeps answering 503 "high demand" or 429 (default `gemini-3.1-flash-lite`). Each call retries the main model twice, then the fallback twice, before returning a 502 to the app. |
 | `GEMINI_USE_VERTEX`, `GCP_LOCATION` | Use Gemini through Vertex AI in your Google Cloud project instead of an API key. |
 
 ## Google Geocoding (place search fallback)

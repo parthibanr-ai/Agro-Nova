@@ -13,6 +13,7 @@ import logging
 from datetime import date
 
 from app.core.config import get_settings
+from app.services import gemini_client
 from app.providers.base import ObservedClimate
 from app.services import knowledge
 from app.services.context import plot_context_block
@@ -56,19 +57,7 @@ def call_gemini(prompt: str) -> dict:
     s = get_settings()
     if not s.gemini_api_key and not s.gemini_use_vertex:
         raise RecommendationUnavailable("Set GEMINI_API_KEY (or GEMINI_USE_VERTEX=true with GCP credentials).")
-    from google import genai
-    from google.genai import types
-
-    if s.gemini_use_vertex:
-        client = genai.Client(vertexai=True, project=s.gee_cloud_project, location=s.gcp_location)
-    else:
-        client = genai.Client(api_key=s.gemini_api_key)
-    resp = client.models.generate_content(
-        model=s.gemini_model,
-        contents=[prompt],
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.4),
-    )
-    return json.loads(resp.text)
+    return gemini_client.generate_json([prompt], temperature=0.4)
 
 
 def assemble(raw: dict) -> dict:
