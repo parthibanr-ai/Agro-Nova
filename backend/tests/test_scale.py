@@ -12,6 +12,7 @@ from app.main import app
 from tests.conftest import NASHIK, FakeProvider
 
 HEADERS = {"X-Dev-User": "farmer-scale"}
+CORNERS = [(30.9010, 75.8570), (30.9010, 75.8590), (30.9030, 75.8590), (30.9030, 75.8570)]
 
 
 def _run_concurrently(slow_request, fast_request, head_start: float = 0.2):
@@ -322,7 +323,7 @@ def test_fresh_earth_engine_result_is_used_as_is(monkeypatch):
 
     gee = _obs(rain_mm=50, rain_normal_mm=80, tmean_c=30, ndvi=0.4, as_of=date.today() - timedelta(days=2))
     p = _resilient(monkeypatch, _Fixed(gee), _Fixed(_obs(rain_mm=1, rain_normal_mm=1)))
-    assert p.observed([], 30) is gee
+    assert p.observed(CORNERS, 30) == gee
 
 
 def test_stale_satellite_rain_uses_fresh_rain_but_keeps_ndvi_and_soil_moisture(monkeypatch):
@@ -331,7 +332,7 @@ def test_stale_satellite_rain_uses_fresh_rain_but_keeps_ndvi_and_soil_moisture(m
     stale = _obs(rain_mm=249, rain_normal_mm=237, tmean_c=29, ndvi=0.31, ndvi_normal=0.4, soil_moisture_pct=11.6,
                  as_of=date.today() - timedelta(days=28), sources=["CHIRPS"])
     fresh = _obs(rain_mm=38, rain_normal_mm=139, tmean_c=31, sources=["Open-Meteo archive (ERA5)"])
-    out = _resilient(monkeypatch, _Fixed(stale), _Fixed(fresh)).observed([], 30)
+    out = _resilient(monkeypatch, _Fixed(stale), _Fixed(fresh)).observed(CORNERS, 30)
     assert (out.rain_mm, out.rain_normal_mm, out.tmean_c) == (38, 139, 31)  # this month, not last month
     assert (out.ndvi, out.ndvi_normal, out.soil_moisture_pct) == (0.31, 0.4, 11.6)
     assert "Sentinel-2" in out.sources and "NASA SMAP" in out.sources and "CHIRPS" not in out.sources
@@ -339,5 +340,5 @@ def test_stale_satellite_rain_uses_fresh_rain_but_keeps_ndvi_and_soil_moisture(m
 
 def test_earth_engine_failure_or_absence_falls_back(monkeypatch):
     fresh = _obs(rain_mm=38, rain_normal_mm=139)
-    assert _resilient(monkeypatch, _Fixed(error=RuntimeError("EE down")), _Fixed(fresh)).observed([], 30) is fresh
-    assert _resilient(monkeypatch, _Fixed(_obs()), _Fixed(fresh), ready=False).observed([], 30) is fresh
+    assert _resilient(monkeypatch, _Fixed(error=RuntimeError("EE down")), _Fixed(fresh)).observed(CORNERS, 30) == fresh
+    assert _resilient(monkeypatch, _Fixed(_obs()), _Fixed(fresh), ready=False).observed(CORNERS, 30) == fresh

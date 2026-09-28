@@ -13,6 +13,16 @@ from app.services import knowledge
 from app.services.enso import EnsoState
 
 
+# Farmer-entered samples (Soil Health Card, lab report) are plain numbers keyed by short names, unlike the
+# {label, value, unit} items that SoilGrids results use. Both must reach the prompt: the farmer's own test is the
+# most accurate soil data we ever have.
+_FARMER_SOIL_LABELS = {
+    "ph": ("pH", ""), "oc": ("Organic carbon", "%"), "n": ("Available nitrogen", "kg/ha"),
+    "p": ("Available phosphorus", "kg/ha"), "k": ("Available potassium", "kg/ha"),
+    "ec": ("Electrical conductivity", "dS/m"),
+}
+
+
 def soil_summary(values: dict) -> str:
     if not values:
         return "No soil data available."
@@ -20,6 +30,9 @@ def soil_summary(values: dict) -> str:
     for key, item in values.items():
         if isinstance(item, dict) and "value" in item:
             parts.append(f"{item.get('label', key)}: {item['value']} {item.get('unit', '')}".strip())
+        elif isinstance(item, (int, float)) and not isinstance(item, bool):
+            label, unit = _FARMER_SOIL_LABELS.get(key.lower(), (key, ""))
+            parts.append(f"{label}: {item} {unit}".strip())
     return "; ".join(parts) if parts else "No soil data available."
 
 

@@ -9,7 +9,7 @@ import logging
 from datetime import date
 
 from app.core.config import get_settings
-from app.services import gemini_client
+from app.services import advice_cache, gemini_client
 from app.providers.base import ObservedClimate
 from app.services.context import plot_context_block
 from app.services.enso import EnsoState
@@ -90,8 +90,11 @@ def advise(kind: str, *, country_code: str, state: str | None, area_ha: float, c
     if kind not in _KINDS:
         raise ValueError(f"Unknown advice kind '{kind}'")
     today = today or date.today()
+    if model_call is None:
+        # Production path: round the inputs so farmers in the same state, crop and conditions share one answer.
+        area_ha, soil_values, observed = advice_cache.bucket_inputs(area_ha, soil_values, observed)
     prompt = build_prompt(kind, country_code=country_code, state=state, area_ha=area_ha, current_crop=current_crop,
                            soil_values=soil_values, observed=observed, enso=enso, has_livestock=has_livestock,
                            today=today)
-    raw = (model_call or call_gemini)(prompt)
+    raw = model_call(prompt) if model_call is not None else advice_cache.cached_call(prompt, call_gemini)
     return assemble(raw)

@@ -11,13 +11,16 @@ from typing import Any
 
 import httpx
 
+from app.core.cache import TTLCache
 from app.core.config import get_settings
 from app.core.languages import get_language
 
 logger = logging.getLogger(__name__)
 
 _API = "https://translation.googleapis.com/language/translate/v2"
-_CACHE: dict[tuple[str, str], str] = {}
+# Bounded LRU: dynamic advice is largely unique text, so an unbounded dict would grow until the process dies.
+_CACHE = TTLCache("translation", max_entries=get_settings().translation_cache_max_entries,
+                  default_ttl=7 * 24 * 3600)
 _BATCH = 100
 
 # Keys whose string values are machine-readable, never translated.
@@ -66,8 +69,8 @@ def translate_texts(texts: list[str], target_google_code: str) -> dict[str, str]
     result: dict[str, str] = {}
     pending = []
     for t in texts:
-        cached = _CACHE.get((target_google_code, t))
-        if cached is not None:
+        hit, cached = _CACHE.get((target_google_code, t))
+        if hit:
             result[t] = cached
         else:
             pending.append(t)
@@ -83,7 +86,7 @@ def translate_texts(texts: list[str], target_google_code: str) -> dict[str, str]
                     )
                     resp.raise_for_status()
                     for src, item in zip(chunk, resp.json()["data"]["translations"], strict=True):
-                        _CACHE[(target_google_code, src)] = item["translatedText"]
+                        _CACHE.set((target_google_code, src), item["translatedText"])
                         result[src] = item["translatedText"]
         except Exception as exc:  # noqa: BLE001
             logger.warning("Translation failed, serving English: %s", exc)

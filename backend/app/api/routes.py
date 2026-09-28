@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_user, require_admin
+from app.core.ratelimit import limit
 from app.core.gee_auth import earth_engine_init_error, is_earth_engine_ready
 from app.core.languages import LANGUAGES, get_language
 from app.db import get_db
@@ -220,7 +221,7 @@ def _plot_soil_and_climate(db: Session, plot: Plot) -> tuple[dict, ObservedClima
     return soil_values, observed
 
 
-@router.get("/plots/{plot_id}/crop-recommendation")
+@router.get("/plots/{plot_id}/crop-recommendation", dependencies=[Depends(limit("ai"))])
 def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     soil_values, observed = _plot_soil_and_climate(db, plot)
@@ -239,7 +240,7 @@ def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user
 
 
 # ------------------------------------------------------------------ diagnosis
-@router.post("/diagnosis")
+@router.post("/diagnosis", dependencies=[Depends(limit("diagnosis"))])
 def diagnose_plant(
     image: UploadFile = File(...),
     crop: str | None = Form(None),
@@ -294,7 +295,7 @@ def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User) 
         return None
 
 
-@router.get("/resilience")
+@router.get("/resilience", dependencies=[Depends(limit("ai"))])
 def resilience(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     cows = (user.livestock or {}).get("cows")
@@ -310,7 +311,7 @@ def livestock_estimate(body: LivestockRequest, user: User = Depends(current_user
         milk_price_per_l=body.milk_price_per_l, feed_cost_per_cow_per_day=body.feed_cost_per_cow_per_day)
 
 
-@router.get("/water-tips")
+@router.get("/water-tips", dependencies=[Depends(limit("ai"))])
 def water_tips(plot_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     return {
@@ -319,7 +320,7 @@ def water_tips(plot_id: str | None = None, user: User = Depends(current_user), d
     }
 
 
-@router.get("/plots/{plot_id}/market")
+@router.get("/plots/{plot_id}/market", dependencies=[Depends(limit("ai"))])
 def market(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))

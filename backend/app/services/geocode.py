@@ -13,6 +13,7 @@ import logging
 
 import httpx
 
+from app.core.cache import TTLCache
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -22,10 +23,19 @@ GOOGLE_GEOCODE = "https://maps.googleapis.com/maps/api/geocode/json"
 USER_AGENT = "AgroNova/1.0 (https://github.com/parthibanr-ai/Agro-Nova)"
 
 
+_cache = TTLCache("geocode", max_entries=50_000, default_ttl=24 * 3600)
+
+
 def search(query: str, limit: int = 5) -> list[dict]:
     query = query.strip()
     if not query:
         return []
+    # Village and district names repeat constantly; this also keeps us inside Nominatim's usage policy.
+    return list(_cache.get_or_compute(("q", query.lower(), limit), lambda: _search(query, limit) or None,
+                                      negative_ttl=600) or [])
+
+
+def _search(query: str, limit: int) -> list[dict]:
     results = _search_nominatim(query, limit)
     if not results:
         results = _search_google(query, limit)

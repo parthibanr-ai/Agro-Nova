@@ -9,6 +9,8 @@ import logging
 
 import httpx
 
+from app.core.cache import TTLCache
+from app.core.config import get_settings
 from app.services import knowledge
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,19 @@ _CONVERT = {
 }
 
 
+_CELL_DEG = 0.0025  # ~275 m: SoilGrids' own resolution is 250 m, so neighbours share one answer
+_cache = TTLCache("soilgrids-cell", max_entries=200_000)
+
+
 def fetch_soilgrids(lat: float, lon: float) -> dict | None:
+    """Modelled soil properties at a point. Cached per ~250 m cell (the dataset is static); a failed lookup is
+    remembered for 5 minutes so a slow or down ISRIC server is not hit by every request."""
+    lat_c, lon_c = round(round(lat / _CELL_DEG) * _CELL_DEG, 5), round(round(lon / _CELL_DEG) * _CELL_DEG, 5)
+    return _cache.get_or_compute(("sg", lat_c, lon_c), lambda: _fetch_soilgrids(lat_c, lon_c),
+                                 ttl=get_settings().soil_cache_ttl_s, negative_ttl=300)
+
+
+def _fetch_soilgrids(lat: float, lon: float) -> dict | None:
     params = [("lat", lat), ("lon", lon), ("depth", "0-5cm"), ("depth", "5-15cm"), ("value", "mean")]
     params += [("property", p) for p in PROPERTIES]
     try:

@@ -39,6 +39,15 @@ def _db():
     init_db()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_caches_and_limits():
+    """Every test starts with empty caches and rate-limit counters, so tests cannot leak results into each other."""
+    from app.core import cache, ratelimit
+
+    cache.clear_all_caches()
+    ratelimit.reset()
+
+
 @pytest.fixture()
 def client(monkeypatch):
     from app.api import routes

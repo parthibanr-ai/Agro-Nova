@@ -10,6 +10,27 @@ Shared by the [mobile](user_manual_mobile.md) and [web](user_manual_web.md) manu
 | `CORS_ORIGINS` | `http://localhost:8080,http://localhost:5173` | Web addresses allowed to call the API from a browser. **Web app only** (the Android app is not a browser and ignores it). Add your deployed web address here. |
 | `DEFAULT_COUNTRY` | `IN` | Country given to a new user until they choose one: `IN`, `BR`, `RU` or `CN`. |
 
+## Capacity, caching and limits
+
+Defaults suit a single server. Tune them when many farmers use the API at once.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_S` | `10`, `20`, `10` | Database connection pool (Postgres etc.; ignored for SQLite). Keep instances x (pool size + overflow) under the database's connection limit; use a connection pooler such as PgBouncer for large fleets. |
+| `CACHE_ENABLED` | `true` | Master switch for every in-process cache. Set `false` to debug stale data. |
+| `CLIMATE_CACHE_TTL_S` | `21600` (6 h) | How long satellite/weather history is reused. Farms in the same ~5 km cell share one lookup per day; Earth Engine results are kept per plot. |
+| `FORECAST_CACHE_TTL_S` | `3600` | How long a forecast is reused per ~5 km cell. |
+| `SOIL_CACHE_TTL_S` | `2592000` (30 d) | How long SoilGrids values are reused (a static dataset, cached per ~250 m cell). |
+| `AI_CACHE_TTL_S` | `86400` (24 h) | How long a Gemini answer is shared. Farmers in the same state with the same crop and rounded conditions (rain to 5-10 mm, temperature to 1 C, area to 0.5 ha) get the same answer, and it refreshes daily. Failed calls are never cached. |
+| `TRANSLATION_CACHE_MAX_ENTRIES` | `200000` | Size limit of the translation cache (least recently used strings are dropped). |
+| `RATE_LIMIT_ENABLED` | `true` | Per-farmer limits on Gemini-backed endpoints. Over the limit the API answers `429` with a `Retry-After` header. |
+| `AI_RATE_PER_MINUTE`, `AI_RATE_PER_DAY` | `20`, `300` | Per farmer, for crop recommendation, resilience, water tips and market advice. |
+| `DIAGNOSIS_RATE_PER_MINUTE`, `DIAGNOSIS_RATE_PER_DAY` | `5`, `40` | Per farmer, for photo diagnosis (the costliest call). |
+| `IP_RATE_PER_MINUTE` | `600` | Per IP address, across those endpoints. High on purpose: mobile carriers put many farmers behind one IP, so this only stops one machine flooding the API. |
+| `TRUST_FORWARDED_FOR` | `false` | Set `true` behind a proxy that adds `X-Forwarded-For` (Cloud Run does) so limits use the real client address. |
+
+Caches and limit counters live in each server's memory, so with several instances each keeps its own (a limit of 20 per minute becomes up to 20 per instance). A shared store such as Redis would make them global; the code is arranged so that only `app/core/cache.py` and `app/core/ratelimit.py` would change.
+
 ## Login and admin
 
 | Setting | Meaning |

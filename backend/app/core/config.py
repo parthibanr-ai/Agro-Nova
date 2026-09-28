@@ -15,6 +15,26 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:8080,http://localhost:5173"
     default_country: str = "IN"
 
+    # Caching (in-process; see app/core/cache.py). Set CACHE_ENABLED=false to bypass every cache.
+    cache_enabled: bool = True
+    climate_cache_ttl_s: int = 6 * 3600  # satellite/weather history for a ~5 km cell
+    forecast_cache_ttl_s: int = 3600
+    soil_cache_ttl_s: int = 30 * 24 * 3600  # SoilGrids is a static modelled dataset
+    ai_cache_ttl_s: int = 24 * 3600  # Gemini advice shared by farmers with the same conditions
+    translation_cache_max_entries: int = 200_000
+
+    # Per-farmer request limits on Gemini-backed endpoints (each instance counts separately).
+    rate_limit_enabled: bool = True
+    ai_rate_per_minute: int = 20
+    ai_rate_per_day: int = 300
+    diagnosis_rate_per_minute: int = 5
+    diagnosis_rate_per_day: int = 40
+    # Deliberately high: mobile carriers put thousands of farmers behind one IPv4 address (carrier-grade NAT), so a
+    # tight per-IP cap would throttle honest users. It only stops a single machine flooding the API; the per-farmer
+    # limits above do the fine-grained work.
+    ip_rate_per_minute: int = 600
+    trust_forwarded_for: bool = False  # true only behind a proxy that sets X-Forwarded-For (Cloud Run does)
+
     auth_mode: str = "dev"  # "dev" | "firebase"
     firebase_credentials_path: str | None = None
     admin_api_key: str = "change-me"
