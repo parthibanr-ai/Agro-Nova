@@ -115,6 +115,7 @@ def run(farmers: int, cached: bool, area: tuple[float, float], seed: int = 7) ->
     personalized_advice.call_gemini = fake_gemini_advice
     translation.httpx.Client = FakeTranslateClient
 
+    random.seed(seed)  # fake_soilgrids uses the global generator: seed it so the run is repeatable
     rng = random.Random(seed)
     client = TestClient(app)
     t0 = time.perf_counter()
@@ -145,8 +146,10 @@ def run(farmers: int, cached: bool, area: tuple[float, float], seed: int = 7) ->
 
 
 def main() -> None:
-    farmers = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
-    side = float(sys.argv[2]) if len(sys.argv) > 2 else None
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    check = "--check" in sys.argv
+    farmers = int(args[0]) if args else 1000
+    side = float(args[1]) if len(args) > 1 else None
     area = (side, side) if side else (1.5, 2.0)
     init_db()
     print(f"Simulating {farmers} farmers over {area[0]} x {area[1]} degrees (~{area[0] * 111:.0f} x {area[1] * 95:.0f} km), "
@@ -164,6 +167,35 @@ def main() -> None:
     print("(Translation characters are billed; the fake Gemini text is unique per call and about 2,000 characters,"
           " like the real thing.)")
     print("cache stats:", {k: v for k, v in cache.stats().items() if v["hits"] or v["misses"]})
+    if check:
+        sys.exit(0 if check_limits(after, farmers) else 1)
+
+
+# The most upstream calls PER FARMER that the shipped code may make in this scenario (7 screens, 2 visits). These are
+# the current measurements with headroom; a change that pushes a number above its limit is making more paid or rate
+# limited calls than before and needs a reason. Lower a limit when an optimisation lands.
+# Scenario for the recorded values: `simulate_sessions.py 150 0.3` (150 farmers in one ~33 km square). The run is
+# seeded, so the numbers repeat exactly; the headroom is for legitimate small changes.
+LIMITS_PER_FARMER = {
+    "Gemini": 2.0,  # measured 1.61
+    "Earth Engine observed()": 1.25,  # measured 1.00: one per plot per day, however many screens are opened
+    "Open-Meteo history (6 HTTP calls each)": 0.4,  # measured 0.29: shared by farmers in the same ~5 km cell
+    "Open-Meteo forecast": 0.4,  # measured 0.29
+    "SoilGrids": 1.25,  # measured 0.99
+    "Translation API characters": 3300,  # measured 2,593
+}
+
+
+def check_limits(after: Counter, farmers: int) -> bool:
+    print(f"\n{'check (per farmer)':42s}{'measured':>12s}{'limit':>10s}")
+    ok = True
+    for key, limit in LIMITS_PER_FARMER.items():
+        per = after[key] / farmers
+        passed = per <= limit
+        ok &= passed
+        print(f"{key:42s}{per:>12.2f}{limit:>10}   {'ok' if passed else 'TOO MANY CALLS'}")
+    print("\nRESULT:", "PASS" if ok else "FAIL: upstream calls per farmer went up")
+    return ok
 
 
 if __name__ == "__main__":

@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # opening instead of being muted. (A backlog of 11 matching schemes is spread over about six days.)
     notify_max_new_schemes_per_day: int = 2
 
+    # Observability
+    log_format: str = "text"  # "json" for Cloud Logging and other log platforms
+    log_level: str = "INFO"
+    metrics_enabled: bool = True  # GET /metrics (admin key), Prometheus format
+
     translate_api_key: str | None = None
 
     google_maps_api_key: str | None = None

@@ -1,21 +1,22 @@
 import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from fastapi.responses import JSONResponse
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_user
 from app.core.ratelimit import limit
 from app.core.gee_auth import earth_engine_init_error, is_earth_engine_ready
 from app.core.languages import LANGUAGES, get_language
-from app.db import get_db
+from app.db import SessionLocal, get_db
 from app.domain.grid import cell_id
 from app.domain.polygon import PolygonValidationError, centroid, polygon_area_m2, validate_plot
 from app.models import Plot, SoilSample, User
 from app.providers.base import ObservedClimate
 from app.providers.registry import get_climate_provider
 from app.schemas import FcmToken, LivestockRequest, PlotCreate, ProfileUpdate, SoilSampleCreate
-from app.services import advice, crop_recommendation, diagnosis, geocode, knowledge, personalized_advice, soil
+from app.services import jobs, advice, crop_recommendation, diagnosis, geocode, knowledge, personalized_advice, soil
 from app.services.enso import get_enso_state
 from app.services.forecast import build_forecast_report
 
@@ -55,6 +56,18 @@ def _plot_json(p: Plot) -> dict:
 @router.get("/health")
 def health() -> dict:
     return {"status": "ok", "earth_engine": is_earth_engine_ready(), "earth_engine_error": earth_engine_init_error()}
+
+
+@router.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness probe: 200 only if the database answers. /health stays a cheap liveness check that never touches it."""
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001
+        logger.exception("readiness check failed")
+        return JSONResponse({"status": "not_ready", "database": "unreachable"}, status_code=503)
+    return JSONResponse({"status": "ready", "database": "ok", "job_queue_depth": jobs.queue_depth()})
 
 
 @router.get("/meta/languages")

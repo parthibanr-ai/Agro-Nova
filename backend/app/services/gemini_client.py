@@ -15,6 +15,7 @@ import random
 import threading
 import time
 
+from app.core import metrics
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,13 @@ def _is_open(model: str) -> bool:
         return _open_until.get(model, 0.0) > time.monotonic()
 
 
+def circuit_states() -> dict[str, bool]:
+    """Model -> whether its circuit breaker is currently open (for /metrics)."""
+    now = time.monotonic()
+    with _lock:
+        return {m: until > now for m, until in _open_until.items()}
+
+
 def _record_success(model: str) -> None:
     with _lock:
         _failures.pop(model, None)
@@ -109,6 +117,7 @@ def generate_json(contents: list, temperature: float) -> dict:
     s = get_settings()
     slots = _get_slots(s.gemini_max_concurrency)
     if not slots.acquire(timeout=s.gemini_queue_timeout_s):
+        metrics.GEMINI_BUSY.inc()
         raise GeminiUnavailable("Gemini is busy right now. Please try again shortly.")
     try:
         return _generate(contents, temperature, s)
@@ -132,16 +141,20 @@ def _generate(contents: list, temperature: float, s) -> dict:
     last: Exception | None = None
     for model in models:
         if _is_open(model):
+            metrics.GEMINI_CALLS.labels(model, "skipped_circuit_open").inc()
             continue
         for attempt in range(ATTEMPTS_PER_MODEL):
             try:
                 resp = client.models.generate_content(model=model, contents=contents, config=config)
                 result = json.loads(resp.text)
                 _record_success(model)
+                metrics.GEMINI_CALLS.labels(model, "success").inc()
                 return result
             except errors.APIError as e:
                 if e.code not in RETRYABLE:
+                    metrics.GEMINI_CALLS.labels(model, "error").inc()
                     raise
+                metrics.GEMINI_CALLS.labels(model, f"http_{e.code}").inc()
                 last = e
                 logger.warning("Gemini %s returned %s (attempt %d)", model, e.code, attempt + 1)
                 _record_failure(model)

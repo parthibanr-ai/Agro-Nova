@@ -1,21 +1,26 @@
 import json
-import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin_routes import router as admin_router
 from app.api.job_routes import router as job_router
 from app.api.routes import router
+from app.core import metrics
+from app.core.auth import require_admin_or_bearer
 from app.core.config import get_settings
 from app.core.gee_auth import init_earth_engine
+from app.core.logging_config import configure_logging, request_id_var
 from app.db import init_db
 from app.services import jobs, tasks
 from app.services.translation import localize_payload
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
+metrics.register_collector()
 
 
 @asynccontextmanager
@@ -60,6 +65,38 @@ async def localize_json(request: Request, call_next):
     headers["Content-Language"] = lang
     return Response(json.dumps(translated, ensure_ascii=False), status_code=response.status_code,
                     headers=headers, media_type="application/json")
+
+
+@app.middleware("http")
+async def observe(request: Request, call_next):
+    """Outermost middleware: stamp a request id on the request's logs and response, and record timing metrics."""
+    request_id = request.headers.get("x-request-id", "")[:64] or uuid.uuid4().hex[:16]
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    status = 500  # what a crash escaping the app looks like to the caller
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        path = request.url.path
+        if get_settings().metrics_enabled and not path.startswith(metrics.UNMEASURED_PATHS):
+            # The route template, never the raw path, so farmer and plot ids do not become metric labels.
+            route = getattr(request.scope.get("route"), "path", None) or "unmatched"
+            metrics.HTTP_REQUESTS.labels(request.method, route, str(status)).inc()
+            metrics.HTTP_LATENCY.labels(request.method, route).observe(time.perf_counter() - started)
+        request_id_var.reset(token)
+
+
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(require_admin_or_bearer)])
+def prometheus_metrics() -> Response:
+    """Prometheus scrape endpoint (admin key as X-API-Key or bearer token)."""
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    if not get_settings().metrics_enabled:
+        return Response("metrics are disabled", status_code=404)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 app.include_router(router)

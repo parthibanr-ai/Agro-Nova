@@ -1,0 +1,111 @@
+# Prometheus alert rules for the Agro Nova API. Load with `rule_files:` in prometheus.yml, or import into
+# Grafana / Google Cloud Managed Service for Prometheus. Each alert links to its runbook in docs/OPERATIONS.md.
+#
+# The scrape job is assumed to be named `agro-nova-api`; the API needs the admin key (see docs/OPERATIONS.md).
+# tests/test_observability.py checks that every agrin_* metric used below really exists, and that the file is
+# valid; `promtool check rules ops/alerts.yml` checks the PromQL syntax.
+groups:
+  - name: agro-nova-availability
+    rules:
+      - alert: AgroNovaDown
+        expr: up{job="agro-nova-api"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "An Agro Nova API instance cannot be scraped"
+          runbook: "docs/OPERATIONS.md#instance-down"
+
+      - alert: AgroNovaHighErrorRate
+        expr: |
+          sum(rate(agrin_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(agrin_http_requests_total[5m])) > 0.02
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "More than 2% of requests are failing with a server error"
+          runbook: "docs/OPERATIONS.md#high-error-rate"
+
+      - alert: AgroNovaReadScreensSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(agrin_http_request_duration_seconds_bucket{
+            route=~"/api/v1/(schemes|me|plots|plots/\\{plot_id\\}/soil|plots/\\{plot_id\\}/forecast)"}[10m]))) > 1
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "p95 of the everyday screens is above 1 second"
+          runbook: "docs/OPERATIONS.md#slow-everyday-screens"
+
+  - name: agro-nova-ai
+    rules:
+      - alert: AgroNovaGeminiCircuitOpen
+        expr: max(agrin_gemini_circuit_open) == 1
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "A Gemini model has been paused for 5 minutes after repeated overload errors"
+          runbook: "docs/OPERATIONS.md#gemini-overloaded"
+
+      - alert: AgroNovaGeminiFailing
+        expr: |
+          sum(rate(agrin_gemini_calls_total{outcome!~"success|skipped_circuit_open"}[10m]))
+            / sum(rate(agrin_gemini_calls_total[10m])) > 0.3
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than 30% of Gemini calls are failing"
+          runbook: "docs/OPERATIONS.md#gemini-overloaded"
+
+      - alert: AgroNovaGeminiBusy
+        expr: sum(rate(agrin_gemini_busy_total[10m])) > 0.1
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Farmers are being told Gemini is busy: every concurrency slot is taken"
+          runbook: "docs/OPERATIONS.md#gemini-overloaded"
+
+      - alert: AgroNovaJobQueueNearlyFull
+        expr: max(agrin_job_queue_depth / agrin_job_queue_max) > 0.8
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "An instance's AI job queue is over 80% full; new requests will soon be turned away"
+          runbook: "docs/OPERATIONS.md#ai-job-queue-full"
+
+      - alert: AgroNovaJobsFailing
+        expr: |
+          sum(rate(agrin_jobs_total{stage="failed"}[15m]))
+            / sum(rate(agrin_jobs_total{stage=~"done|failed"}[15m])) > 0.25
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than a quarter of AI jobs are failing"
+          runbook: "docs/OPERATIONS.md#ai-jobs-failing"
+
+      - alert: AgroNovaAdviceCacheColdSpend
+        expr: |
+          sum(rate(agrin_cache_hits_total{cache="ai-advice"}[1h]))
+            / (sum(rate(agrin_cache_hits_total{cache="ai-advice"}[1h]))
+               + sum(rate(agrin_cache_misses_total{cache="ai-advice"}[1h]))) < 0.5
+        for: 2h
+        labels: {severity: info}
+        annotations:
+          summary: "Under half of AI advice requests are served from cache: Gemini spend is higher than expected"
+          runbook: "docs/OPERATIONS.md#gemini-spend-is-high"
+
+  - name: agro-nova-capacity
+    rules:
+      - alert: AgroNovaDbPoolSaturated
+        expr: max(agrin_db_pool_checked_out / agrin_db_pool_capacity) > 0.9
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "An instance is using over 90% of its database connections"
+          runbook: "docs/OPERATIONS.md#database-connections-exhausted"
+
+      - alert: AgroNovaRateLimitSpike
+        expr: sum(rate(agrin_rate_limited_total[5m])) > 5
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Requests are being refused by rate limits at a high rate (abuse, or a misbehaving app version)"
+          runbook: "docs/OPERATIONS.md#rate-limit-spike"

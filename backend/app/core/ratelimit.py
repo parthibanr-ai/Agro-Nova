@@ -14,6 +14,7 @@ import time
 
 from fastapi import Depends, HTTPException, Request
 
+from app.core import metrics
 from app.core.auth import current_user
 from app.core.config import get_settings
 from app.models import User
@@ -81,6 +82,7 @@ def limit(kind: str):
         ):
             wait = _hit(scope, ident, cap, window)
             if wait is not None:
+                metrics.RATE_LIMITED.labels(scope).inc()
                 raise HTTPException(429, "Too many requests. Please wait a little and try again.",
                                     headers={"Retry-After": str(wait)})
 

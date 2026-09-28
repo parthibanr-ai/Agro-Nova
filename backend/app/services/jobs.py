@@ -30,6 +30,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from app.core import metrics
 from app.core.config import get_settings
 from app.db import SessionLocal
 from app.models import Job, User
@@ -127,7 +128,9 @@ def enqueue(db: Session, user: User, kind: str, params: dict, payload: Any = Non
         with _lock:
             _futures[job.id] = future
         future.add_done_callback(lambda _f, jid=job.id: _finished(jid))
+        metrics.JOBS.labels(kind, "accepted").inc()
     else:
+        metrics.JOBS.labels(kind, "deduplicated").inc()
         future = _futures.get(job.id)  # only present if this instance is the one running it
 
     wait = s.job_fast_wait_s if wait_s is None else wait_s
@@ -179,6 +182,7 @@ def _run(job_id: str, payload: Any) -> None:
         db.execute(update(Job).where(Job.id == job_id, Job.status == "running")
                    .values(finished_at=_now(), **outcome).execution_options(synchronize_session=False))
         db.commit()
+        metrics.JOBS.labels(kind, outcome["status"]).inc()
         if params.get("notify") and outcome["status"] == "done" and user.fcm_token:
             _notify(user, job_id, kind)
 

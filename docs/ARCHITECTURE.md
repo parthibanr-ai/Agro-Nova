@@ -9,7 +9,8 @@ Flutter (Android / iOS / Web)  --HTTPS+Firebase ID token-->  FastAPI on Cloud Ru
    ARB UI strings (26 langs)                                   |-- Cloud Translation (dynamic content)
                                                                |-- NOAA CPC ONI (El Nino/La Nina)
                                                                |-- ISRIC SoilGrids, Open-Meteo (keyless fallbacks)
-                                                               |-- Cloud SQL / SQLite (plots, soil samples, users)
+                                                               |-- Postgres (Cloud SQL) / SQLite: users, plots, soil, jobs
+                                                               |-- in-process caches, AI job workers, push fan-out tasks
 Earth Engine --batch--> BigQuery --> Vertex AI / BigQuery ML (seasonal outlook model, phase 2)
 ```
 
@@ -42,9 +43,10 @@ preparation, prevention and the "why organic vs. chemical" text come from the cu
 model, so advice stays organic-first and consistent. Low confidence returns "retake the photo / see your KVK".
 
 **Schemes and push.** Schemes are curated per country with an official URL; the API filters by
-country/state/crop/farm size. `notifications.py` builds per-farmer digests (new schemes, ENSO/weather
-advisory, value-addition nudge), localises them and sends via FCM; run it from Cloud Scheduler calling
-`POST /api/v1/admin/notifications/dispatch?dry_run=false`.
+country/state/crop/farm size. `notifications.py` groups farmers into audiences (country, state, first crop,
+language), builds each audience's digest once (new schemes, ENSO/weather advisory, value-addition nudge),
+localises it once and sends it 500 devices per FCM call; run it from Cloud Scheduler calling
+`POST /api/v1/admin/notifications/dispatch?dry_run=false`. See section 6.
 
 **Resilience, water, market.** Livestock calculator (milk income, feed cost, dung -> compost, biogas,
 manure self-sufficiency of the plot), an integrated-farming roadmap, water tips prioritised by crop and
@@ -73,10 +75,44 @@ CMA) plug in as `ClimateProvider` implementations.
 2. **Machine translation of farm advice** must be reviewed by native speakers.
 3. **Bhuvan** has no stable public API; integrate through a data-sharing agreement/WMS as ISRO permits.
 4. **Earth Engine** commercial use requires the appropriate Cloud licence.
-5. Secure production: `AUTH_MODE=firebase`, a real `ADMIN_API_KEY`, Cloud SQL (PostGIS), rate-limit `/diagnosis`.
+5. Secure production: `AUTH_MODE=firebase`, a real `ADMIN_API_KEY`, Postgres. Per-farmer rate limits exist;
+   Firebase App Check (to stop scripted anonymous sign-ins) is not wired yet.
 6. Offline-first for low connectivity (queue plots and soil samples locally, sync later) is not built yet.
 
-## 6. Roadmap
+## 6. Scaling and operations
+
+The design goal is that the cost of serving a farmer is a cache lookup, because nearly everything is shared by
+farmers in the same area. What each layer does:
+
+- **Requests never wait on a slow upstream while holding a thread or a database connection.** Slow AI requests
+  (crop recommendation, photo diagnosis) are jobs: the API answers at once (or within about 2 s if the result is
+  cached) and the app polls `GET /jobs/{id}`. Jobs are rows in the database, so any instance can answer a poll;
+  the work runs on the accepting instance's bounded worker pool, and a job whose instance dies is failed after a
+  lease so the app retries. Calls to Gemini are capped per instance (`GEMINI_MAX_CONCURRENCY`), retried within a
+  time budget, and paused by a circuit breaker when Gemini is overloaded. (`services/jobs.py`, `gemini_client.py`)
+- **Shared work is done once.** Weather history and forecasts are cached per ~5 km cell, SoilGrids per ~250 m
+  cell, Earth Engine per plot, and Gemini advice is shared by farmers with the same state, crop and rounded
+  conditions. Concurrent requests for the same missing item make one upstream call. (`core/cache.py`,
+  `services/advice_cache.py`, `providers/registry.py`)
+- **Push notifications are computed per audience, not per farmer** and sent in batches, with a database claim per
+  audience-day so retries never send twice. `users.primary_crop` plus a partial index make each page of an
+  audience a short index scan. Measured on Postgres 16: 1,000,000 farmers plan and send in about 17 s with FCM
+  faked (the first version, which recomputed each farmer's first plot per page, took 104 s for 200,000).
+  (`services/notifications.py`, `services/tasks.py`)
+- **The schema is migrated, not recreated** (`migrations/`, Alembic). SQLite migrates itself at start-up; Postgres
+  runs `python -m app.migrate` once per release. A test fails if the models and migrations disagree.
+- **Limits and visibility.** Per-farmer and per-IP rate limits on Gemini-backed endpoints; Prometheus metrics at
+  `/metrics`; request ids on every log line; liveness and readiness probes; alert rules and runbooks in
+  [OPERATIONS.md](OPERATIONS.md); a CI gate that fails if a change makes more upstream calls per farmer.
+
+**What is still open for a national rollout.** Caches and rate-limit counters live in each instance's memory, so a
+shared store (Redis) is needed when the instance count is large. Earth Engine is still called once per plot per
+day, at 10 to 30 s each; at national scale that becomes a nightly batch into BigQuery with the API doing a lookup.
+Firebase App Check, offline-first behaviour in the app, and written confirmation of the licence and quota terms of
+Earth Engine, Gemini and the weather sources are also open. None of this has been load-tested at national volume;
+`loadtest/k6_farmers.js` is the tool for testing a staging deployment.
+
+## 7. Roadmap
 
 1. Now: this repo (backend tested; Flutter code written but not compiled).
 2. Compile/fix the Flutter app, wire Firebase and Maps keys, deploy to Cloud Run.

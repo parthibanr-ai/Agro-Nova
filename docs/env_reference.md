@@ -60,6 +60,18 @@ GET  /api/v1/admin/notifications/runs                     (progress: audiences d
 - **Fleets:** tasks run on the instance's own workers (`TASK_WORKERS`, default 4). To spread them over many instances, enqueue them on Cloud Tasks instead and point its HTTP target at `POST /api/v1/internal/tasks/notify-segment` (admin key), which runs the same handler.
 - Without Firebase credentials nothing is sent (the run only logs).
 
+## Monitoring and logs
+
+How to connect Prometheus, what the alerts mean and what to do about them are in [OPERATIONS.md](OPERATIONS.md). The settings:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics`. It needs the admin key (`X-API-Key`, or `Authorization: Bearer <key>` as Prometheus sends it). |
+| `LOG_FORMAT` | `text` | `json` writes one JSON object per line (Cloud Logging and most platforms read it directly). |
+| `LOG_LEVEL` | `INFO` | Standard Python log level. |
+
+Every response carries an `X-Request-ID` header and every log line written while handling that request carries the same id, so a failure report can be traced through the logs. Send your own `X-Request-ID` to correlate with a load balancer's id. `GET /api/v1/health` is a cheap liveness check; `GET /api/v1/ready` also checks the database and answers `503` if it is unreachable.
+
 ## Capacity, caching and limits
 
 Defaults suit a single server. Tune them when many farmers use the API at once.

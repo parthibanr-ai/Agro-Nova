@@ -1,5 +1,7 @@
 """Authentication: Firebase ID tokens in production, an X-Dev-User header for local development."""
 
+import hmac
+
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -64,6 +66,17 @@ def current_user(
     return user
 
 
+def _is_admin_key(candidate: str | None) -> bool:
+    return candidate is not None and hmac.compare_digest(candidate.encode(), get_settings().admin_api_key.encode())
+
+
 def require_admin(x_api_key: str | None = Header(None)) -> None:
-    if x_api_key != get_settings().admin_api_key:
+    if not _is_admin_key(x_api_key):
+        raise HTTPException(403, "Admin key required")
+
+
+def require_admin_or_bearer(x_api_key: str | None = Header(None), authorization: str | None = Header(None)) -> None:
+    """The admin key as `X-API-Key`, or as `Authorization: Bearer <key>` (what Prometheus' `authorization` sends)."""
+    bearer = authorization.split(" ", 1)[1] if authorization and authorization.lower().startswith("bearer ") else None
+    if not (_is_admin_key(x_api_key) or _is_admin_key(bearer)):
         raise HTTPException(403, "Admin key required")
