@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     gee_cloud_project: str | None = None
 
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-flash-latest"
-    gemini_fallback_model: str | None = "gemini-3.1-flash-lite"
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_fallback_model: str | None = "gemini-3.6-flash,gemini-flash-lite-latest"
     gemini_use_vertex: bool = False
     gcp_location: str = "asia-south1"
 

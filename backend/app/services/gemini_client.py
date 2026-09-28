@@ -1,7 +1,7 @@
 """Shared Gemini call used by diagnosis, crop recommendation and personalised advice.
 
 Gemini intermittently answers 503 "high demand" (or 429) for a given model. Retry briefly, then fall back to
-GEMINI_FALLBACK_MODEL, so a short spike does not fail the farmer's request. Other errors (bad key, bad request)
+GEMINI_FALLBACK_MODEL (a comma-separated list, tried in order), so a short spike does not fail the farmer's request. Other errors (bad key, bad request)
 are raised immediately.
 """
 
@@ -13,8 +13,8 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-ATTEMPTS_PER_MODEL = 2
-RETRY_DELAY_S = 1.5
+ATTEMPTS_PER_MODEL = 3
+RETRY_DELAY_S = 1.5  # doubled after each failed attempt
 
 
 def generate_json(contents: list, temperature: float) -> dict:
@@ -29,8 +29,10 @@ def generate_json(contents: list, temperature: float) -> dict:
     config = types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature)
 
     models = [s.gemini_model]
-    if s.gemini_fallback_model and s.gemini_fallback_model not in models:
-        models.append(s.gemini_fallback_model)
+    for m in (s.gemini_fallback_model or "").split(","):
+        m = m.strip()
+        if m and m not in models:
+            models.append(m)
 
     last: Exception | None = None
     for model in models:
@@ -43,6 +45,6 @@ def generate_json(contents: list, temperature: float) -> dict:
                     raise
                 last = e
                 logger.warning("Gemini %s returned %s (attempt %d)", model, e.code, attempt + 1)
-                time.sleep(RETRY_DELAY_S)
+                time.sleep(RETRY_DELAY_S * 2 ** attempt)
     assert last is not None
     raise last

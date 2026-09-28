@@ -60,8 +60,8 @@ The first forecast with Earth Engine active can take 10 to 30 seconds. If Earth 
 | Setting | Meaning |
 |---|---|
 | `GEMINI_API_KEY` | Create at https://aistudio.google.com/apikey (newer keys start with `AQ.`; older ones with `AIza`). It must belong to a project with credits or billing, otherwise every call fails with "prepayment credits are depleted". This key is separate from the Maps and Translation keys, whose API restrictions do not include Gemini. Without it, `/diagnosis`, `/plots/{id}/crop-recommendation`, and the personalized sections of `/resilience`, `/water-tips` and `/plots/{id}/market` are unavailable; the rest of the app works. The free tier has a low daily request cap - enable billing on the project to lift it. |
-| `GEMINI_MODEL` | Model to use (default `gemini-flash-latest`). Older models such as `gemini-2.5-flash` return 404 "no longer available to new users" on new keys. A temporary 503 "high demand" can occur; retry. |
-| `GEMINI_FALLBACK_MODEL` | Used when `GEMINI_MODEL` keeps answering 503 "high demand" or 429 (default `gemini-3.1-flash-lite`). Each call retries the main model twice, then the fallback twice, before returning a 502 to the app. |
+| `GEMINI_MODEL` | Model to use (default `gemini-3.1-flash-lite`, the most reliable under Google's demand spikes). Older models such as `gemini-2.5-flash` return 404 "no longer available to new users" on new keys. A temporary 503 "high demand" can occur; retry. |
+| `GEMINI_FALLBACK_MODEL` | Used when `GEMINI_MODEL` keeps answering 503 "high demand" or 429 (default `gemini-3.6-flash,gemini-flash-lite-latest`; a comma-separated list, tried in order). Each call tries the main model up to 3 times with increasing waits, then each fallback the same way, before returning a 502 to the app. |
 | `GEMINI_USE_VERTEX`, `GCP_LOCATION` | Use Gemini through Vertex AI in your Google Cloud project instead of an API key. |
 
 ## Google Geocoding (place search fallback)
