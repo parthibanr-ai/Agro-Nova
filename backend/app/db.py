@@ -13,7 +13,16 @@ class Base(DeclarativeBase):
 
 _settings = get_settings()
 _is_sqlite = _settings.database_url.startswith("sqlite")
-_kwargs: dict = {"connect_args": {"check_same_thread": False}} if _is_sqlite else {}
+_kwargs: dict = (
+    {"connect_args": {"check_same_thread": False}}
+    if _is_sqlite
+    else {
+        "pool_size": _settings.db_pool_size,
+        "max_overflow": _settings.db_max_overflow,
+        "pool_timeout": _settings.db_pool_timeout_s,
+        "pool_pre_ping": True,  # drop connections the server or a proxy has silently closed
+    }
+)
 if _settings.database_url in ("sqlite://", "sqlite:///:memory:"):
     _kwargs["poolclass"] = StaticPool
 

@@ -4,9 +4,12 @@ Datasets (all in the public EE catalog):
   - UCSB-CHG/CHIRPS/DAILY             rainfall (5 km), 1981-present  -> rain + historic normal
   - ECMWF/ERA5_LAND/DAILY_AGGR        2 m temperature
   - COPERNICUS/S2_SR_HARMONIZED       Sentinel-2 surface reflectance -> NDVI (10 m)
-  - NASA/SMAP/SPL4SMGP/007            SMAP L4 soil moisture (surface)
+  - NASA/SMAP/SPL4SMGP/008            SMAP L4 soil moisture (surface); 007 was superseded and stopped in 2025
 
-The plot is small relative to CHIRPS/ERA5/SMAP pixels; those bands are effectively point values.
+The plot is small relative to CHIRPS/ERA5/SMAP pixels (5-11 km), so those bands are sampled at the plot's centre
+point: reducing over a polygon smaller than one pixel returns nothing, because no pixel centre falls inside it.
+CHIRPS also runs several weeks behind real time, so the rainfall window ends at its latest available day rather
+than today (otherwise "last 30 days" would hold a few days of rain compared against a full-month normal).
 Sentinel-2 NDVI is the plot-resolution signal (needs cloud-free scenes; falls back to None).
 """
 
@@ -16,6 +19,13 @@ from app.providers.base import ClimateProvider, DailyForecast, ObservedClimate
 from app.providers.open_meteo import OpenMeteoProvider
 
 NORMAL_YEARS = 10
+
+
+def _years_ago(d: date, k: int) -> date:
+    try:
+        return d.replace(year=d.year - k)
+    except ValueError:  # 29 February in a non-leap year
+        return d.replace(year=d.year - k, day=28)
 
 
 class GEEProvider(ClimateProvider):
@@ -28,34 +38,39 @@ class GEEProvider(ClimateProvider):
         import ee
 
         geom = ee.Geometry.Polygon([[(lon, lat) for lat, lon in corners]])
-        end = date.today()
+        point = geom.centroid(1)  # rain / temperature / soil-moisture pixels are 5-11 km: sample the centre
+        today = date.today()
+
+        # CHIRPS lags real time by weeks; end the window at its latest day so it is a real `window_days` long.
+        chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+        latest = chirps.sort("system:time_start", False).first().date().format("YYYY-MM-dd").getInfo()
+        end = min(today, date.fromisoformat(latest) + timedelta(days=1))  # filterDate's end is exclusive
         start = end - timedelta(days=window_days)
 
         def window_sum_rain(s: date, e: date) -> ee.Number:
-            img = (
-                ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
-                .filterDate(s.isoformat(), e.isoformat())
-                .select("precipitation")
-                .sum()
-            )
-            return ee.Number(img.reduceRegion(ee.Reducer.mean(), geom, 5566).get("precipitation"))
+            img = chirps.filterDate(s.isoformat(), e.isoformat()).select("precipitation").sum()
+            return ee.Number(img.reduceRegion(ee.Reducer.mean(), point, 5566).get("precipitation"))
 
         rain = window_sum_rain(start, end).getInfo()
         normals = [
-            window_sum_rain(start.replace(year=start.year - k), end.replace(year=end.year - k))
+            window_sum_rain(_years_ago(start, k), _years_ago(end, k))
             for k in range(1, NORMAL_YEARS + 1)
         ]
         normal = ee.List(normals).reduce(ee.Reducer.mean()).getInfo()
 
-        tmean_k = (
-            ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR")
-            .filterDate(start.isoformat(), end.isoformat())
-            .select("temperature_2m")
-            .mean()
-            .reduceRegion(ee.Reducer.mean(), geom, 11132)
-            .get("temperature_2m")
-        )
-        tmean = ee.Number(tmean_k).subtract(273.15).getInfo()
+        try:
+            tmean_k = (
+                ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR")
+                .filterDate(start.isoformat(), end.isoformat())
+                .select("temperature_2m")
+                .mean()
+                .reduceRegion(ee.Reducer.mean(), point, 11132)
+                .get("temperature_2m")
+                .getInfo()
+            )
+            tmean = tmean_k - 273.15 if tmean_k is not None else None
+        except Exception:  # noqa: BLE001
+            tmean = None
 
         def ndvi_mean(s: date, e: date):
             col = (
@@ -67,39 +82,43 @@ class GEEProvider(ClimateProvider):
             )
             return col.mean().reduceRegion(ee.Reducer.mean(), geom, 10).get("ndvi")
 
+        # Sentinel-2 is near-real-time, so its window ends today, not at the rainfall cut-off.
         try:
-            ndvi = ee.Number(ndvi_mean(end - timedelta(days=30), end)).getInfo()
+            ndvi = ee.Number(ndvi_mean(today - timedelta(days=30), today)).getInfo()
         except Exception:  # noqa: BLE001 - cloud cover can leave no scenes
             ndvi = None
         try:
             ndvi_normal = ee.Number(ndvi_mean(
-                (end - timedelta(days=30)).replace(year=end.year - 1), end.replace(year=end.year - 1)
+                _years_ago(today - timedelta(days=30), 1), _years_ago(today, 1)
             )).getInfo()
         except Exception:  # noqa: BLE001
             ndvi_normal = None
 
         try:
             sm = (
-                ee.ImageCollection("NASA/SMAP/SPL4SMGP/007")
-                .filterDate((end - timedelta(days=7)).isoformat(), end.isoformat())
+                ee.ImageCollection("NASA/SMAP/SPL4SMGP/008")
+                .filterDate((today - timedelta(days=7)).isoformat(), today.isoformat())
                 .select("sm_surface")
                 .mean()
-                .reduceRegion(ee.Reducer.mean(), geom, 11000)
+                .reduceRegion(ee.Reducer.mean(), point, 11000)
                 .get("sm_surface")
             )
             soil_moisture = ee.Number(sm).multiply(100).getInfo()
         except Exception:  # noqa: BLE001
             soil_moisture = None
 
+        sources = [name for name, value in (("CHIRPS", rain), ("ERA5-Land", tmean), ("Sentinel-2", ndvi),
+                                            ("NASA SMAP", soil_moisture)) if value is not None]
         return ObservedClimate(
             window_days=window_days,
             rain_mm=round(rain, 1) if rain is not None else None,
             rain_normal_mm=round(normal, 1) if normal is not None else None,
-            tmean_c=round(tmean, 1),
+            tmean_c=round(tmean, 1) if tmean is not None else None,
             ndvi=round(ndvi, 3) if ndvi is not None else None,
             ndvi_normal=round(ndvi_normal, 3) if ndvi_normal is not None else None,
             soil_moisture_pct=round(soil_moisture, 1) if soil_moisture is not None else None,
-            sources=["CHIRPS", "ERA5-Land", "Sentinel-2", "NASA SMAP"],
+            as_of=end - timedelta(days=1),
+            sources=sources,
         )
 
     def forecast(self, lat: float, lon: float, days: int) -> list[DailyForecast]:

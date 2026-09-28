@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 ONI_URL = "https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt"
 _TTL = 24 * 3600
+_FAIL_TTL = 300  # after a failed fetch, do not retry for this long (otherwise every request waits on a dead server)
 _cache: tuple[float, "EnsoState"] | None = None
+_failed_at: float | None = None
 
 
 @dataclass
@@ -68,16 +70,20 @@ def state_from_rows(rows: list[tuple[str, int, float]]) -> EnsoState:
 
 
 def get_enso_state(force: bool = False) -> EnsoState:
-    global _cache
+    global _cache, _failed_at
     if not force and _cache and time.time() - _cache[0] < _TTL:
         return _cache[1]
+    if not force and _failed_at is not None and time.time() - _failed_at < _FAIL_TTL:
+        return _cache[1] if _cache else EnsoState(False, "unknown", "unknown", None, None, "unknown")
     try:
         resp = httpx.get(ONI_URL, timeout=10)
         resp.raise_for_status()
         state = state_from_rows(parse_oni(resp.text))
         if state.available:
             _cache = (time.time(), state)
+            _failed_at = None
         return state
     except Exception as exc:  # noqa: BLE001
         logger.warning("ONI fetch failed: %s", exc)
+        _failed_at = time.time()
         return _cache[1] if _cache else EnsoState(False, "unknown", "unknown", None, None, "unknown")

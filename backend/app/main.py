@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
@@ -31,6 +32,10 @@ app.add_middleware(
 )
 
 
+def _localize(body: bytes, lang: str):
+    return localize_payload(json.loads(body), lang)
+
+
 @app.middleware("http")
 async def localize_json(request: Request, call_next):
     """Translate human-readable JSON strings to the caller's language (?lang= or Accept-Language)."""
@@ -44,7 +49,8 @@ async def localize_json(request: Request, call_next):
     ):
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
-    translated = localize_payload(json.loads(body), lang)
+    # Translation makes blocking HTTP calls; run it in a worker thread so the event loop keeps serving others.
+    translated = await run_in_threadpool(_localize, body, lang)
     headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "content-type")}
     headers["Content-Language"] = lang
     return Response(json.dumps(translated, ensure_ascii=False), status_code=response.status_code,

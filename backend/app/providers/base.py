@@ -14,6 +14,7 @@ class ObservedClimate:
     ndvi: float | None = None
     ndvi_normal: float | None = None
     soil_moisture_pct: float | None = None  # volumetric, root zone / surface
+    as_of: date | None = None  # last day covered by the rain/temperature window (satellite rain products lag)
     sources: list[str] = field(default_factory=list)
 
 

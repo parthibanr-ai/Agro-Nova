@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "sqlite:///./agrin.db"
+    # Connection pool for Postgres etc. (ignored for SQLite). Size it so (instances x pool_size + max_overflow)
+    # stays under the database's connection limit; put PgBouncer in front for large fleets.
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout_s: int = 10
     cors_origins: str = "http://localhost:8080,http://localhost:5173"
     default_country: str = "IN"
 

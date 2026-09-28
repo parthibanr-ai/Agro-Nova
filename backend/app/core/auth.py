@@ -1,6 +1,7 @@
 """Authentication: Firebase ID tokens in production, an X-Dev-User header for local development."""
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -52,7 +53,14 @@ def current_user(
     if user is None:
         user = User(uid=uid, country=settings.default_country)
         db.add(user)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # The app fires several requests at start-up; a parallel one created this user first.
+            db.rollback()
+            user = db.get(User, uid)
+            if user is None:
+                raise
     return user
 
 

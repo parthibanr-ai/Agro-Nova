@@ -22,6 +22,16 @@ router = APIRouter(prefix="/api/v1")
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
+def _release_db(db: Session) -> None:
+    """End the read transaction so its pooled connection is free while we wait on a slow external service.
+
+    Rows already loaded stay usable (sessions are created with expire_on_commit=False); anything loaded later
+    simply opens a new short transaction. Without this, every AI/satellite request holds one of a small number of
+    pooled connections for the whole time Gemini or Earth Engine takes to answer.
+    """
+    db.commit()
+
+
 def _plot_or_404(db: Session, user: User, plot_id: str) -> Plot:
     plot = db.get(Plot, plot_id)
     if plot is None or plot.owner_uid != user.uid:
@@ -148,6 +158,7 @@ def delete_plot(plot_id: str, user: User = Depends(current_user), db: Session = 
 def get_soil(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     samples = sorted(plot.soil_samples, key=lambda s: s.created_at, reverse=True)
+    _release_db(db)
     public = None if samples else soil.fetch_soilgrids(plot.centroid_lat, plot.centroid_lon)
     values = samples[0].values if samples else (public or {})
     return {
@@ -183,6 +194,7 @@ def enso() -> dict:
 @router.get("/plots/{plot_id}/forecast")
 def forecast(plot_id: str, days: int = 10, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
+    _release_db(db)
     provider = get_climate_provider()
     try:
         observed = provider.observed(plot.corner_points, 30)
@@ -195,14 +207,15 @@ def forecast(plot_id: str, days: int = 10, user: User = Depends(current_user), d
     return build_forecast_report(plot=plot, observed=observed, daily=daily, enso=get_enso_state())
 
 
-def _plot_soil_and_climate(plot: Plot) -> tuple[dict, ObservedClimate | None]:
+def _plot_soil_and_climate(db: Session, plot: Plot) -> tuple[dict, ObservedClimate | None]:
     """Best-effort soil values + recent observed satellite/climate for one plot, for LLM grounding."""
+    samples = sorted(plot.soil_samples, key=lambda s: s.created_at, reverse=True)
+    _release_db(db)
     provider = get_climate_provider()
     try:
         observed = provider.observed(plot.corner_points, 30)
     except Exception:  # noqa: BLE001 - keep advice useful even if history is unavailable
         observed = None
-    samples = sorted(plot.soil_samples, key=lambda s: s.created_at, reverse=True)
     soil_values = samples[0].values if samples else (soil.fetch_soilgrids(plot.centroid_lat, plot.centroid_lon) or {})
     return soil_values, observed
 
@@ -210,7 +223,7 @@ def _plot_soil_and_climate(plot: Plot) -> tuple[dict, ObservedClimate | None]:
 @router.get("/plots/{plot_id}/crop-recommendation")
 def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
-    soil_values, observed = _plot_soil_and_climate(plot)
+    soil_values, observed = _plot_soil_and_climate(db, plot)
     try:
         result = crop_recommendation.recommend(
             country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000, current_crop=plot.crop,
@@ -227,7 +240,7 @@ def crop_recommendation_for_plot(plot_id: str, user: User = Depends(current_user
 
 # ------------------------------------------------------------------ diagnosis
 @router.post("/diagnosis")
-async def diagnose_plant(
+def diagnose_plant(
     image: UploadFile = File(...),
     crop: str | None = Form(None),
     notes: str | None = Form(None),
@@ -235,15 +248,19 @@ async def diagnose_plant(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    # A plain `def` route runs in FastAPI's worker-thread pool, so the slow, blocking Gemini call below cannot
+    # stall the event loop that every other request depends on.
     if image.content_type not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(415, "Upload a JPEG, PNG or WebP photo")
-    data = await image.read()
+    data = image.file.read(MAX_IMAGE_BYTES + 1)
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Photo is larger than 8 MB")
     if plot_id:
         crop = crop or _plot_or_404(db, user, plot_id).crop
+    country = user.country
+    _release_db(db)
     try:
-        return diagnosis.diagnose(data, image.content_type, crop, user.country, notes)
+        return diagnosis.diagnose(data, image.content_type, crop, country, notes)
     except diagnosis.DiagnosisUnavailable as e:
         raise HTTPException(503, str(e)) from e
     except Exception as e:  # noqa: BLE001
@@ -259,11 +276,11 @@ def schemes(plot_id: str | None = None, category: str | None = None,
                                    plot.area_m2 / 10_000 if plot else None, category)
 
 
-def _personalized_advice(kind: str, plot: Plot | None, user: User) -> dict | None:
+def _personalized_advice(db: Session, kind: str, plot: Plot | None, user: User) -> dict | None:
     """Hyper-personalised LLM advice grounded in this plot's soil/climate/ENSO data, or None without a plot."""
     if plot is None:
         return None
-    soil_values, observed = _plot_soil_and_climate(plot)
+    soil_values, observed = _plot_soil_and_climate(db, plot)
     try:
         return personalized_advice.advise(
             kind, country_code=plot.country, state=plot.state, area_ha=plot.area_m2 / 10_000,
@@ -282,7 +299,7 @@ def resilience(plot_id: str | None = None, user: User = Depends(current_user), d
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     cows = (user.livestock or {}).get("cows")
     plan = advice.resilience_plan(cows, plot.area_m2 / 4046.856 if plot else None)
-    plan["personalized"] = _personalized_advice("resilience", plot, user)
+    plan["personalized"] = _personalized_advice(db, "resilience", plot, user)
     return plan
 
 
@@ -298,7 +315,7 @@ def water_tips(plot_id: str | None = None, user: User = Depends(current_user), d
     plot = _plot_or_404(db, user, plot_id) if plot_id else None
     return {
         "tips": advice.water_tips(plot.crop if plot else None, get_enso_state()),
-        "personalized": _personalized_advice("water", plot, user),
+        "personalized": _personalized_advice(db, "water", plot, user),
     }
 
 
@@ -306,7 +323,7 @@ def water_tips(plot_id: str | None = None, user: User = Depends(current_user), d
 def market(plot_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     plot = _plot_or_404(db, user, plot_id)
     out = advice.market_advice(plot.country, plot.crop, bool((user.livestock or {}).get("cows")))
-    out["personalized"] = _personalized_advice("market", plot, user)
+    out["personalized"] = _personalized_advice(db, "market", plot, user)
     return out
 
 
