@@ -218,7 +218,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   static final _rng = Random.secure();
   static String _newRef() =>
-      '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-${_rng.nextInt(1 << 32).toRadixString(36)}';
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-${_rng.nextInt(0x100000000).toRadixString(36)}';
 
   /// Creates the plot; throws [ApiException] with the server's validation message on bad geometry. With no
   /// connection the plot is kept on the phone and sent later, and is returned marked [Plot.pending].

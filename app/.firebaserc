@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "agro-nova-oct"
+    "default": "agro-nova-oct",
+    "new": "parthi-agro"
   }
 }

@@ -28,7 +28,7 @@ Future<void> main() async {
   var firebaseOn = false;
   var appCheckOn = false;
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(options: _firebaseOptionsFromDefines());
     firebaseOn = true;
     appCheckOn = await _activateAppCheck();
     if (FirebaseAuth.instance.currentUser == null) await FirebaseAuth.instance.signInAnonymously();
@@ -96,6 +96,22 @@ void _listenForPushTaps(AppState state) {
       ));
     });
   } catch (_) {} // no push in this environment; the app works without it
+}
+
+/// Firebase settings given at build time (--dart-define-from-file=firebase.<project>.json), so a build can target
+/// another Firebase project without committing its keys. Returns null when FIREBASE_API_KEY is not given, which
+/// keeps the default: the platform's own config (google-services.json on Android).
+FirebaseOptions? _firebaseOptionsFromDefines() {
+  const apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  if (apiKey.isEmpty) return null;
+  return const FirebaseOptions(
+    apiKey: apiKey,
+    appId: String.fromEnvironment('FIREBASE_APP_ID'),
+    messagingSenderId: String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
+    projectId: String.fromEnvironment('FIREBASE_PROJECT_ID'),
+    authDomain: String.fromEnvironment('FIREBASE_AUTH_DOMAIN'),
+    storageBucket: String.fromEnvironment('FIREBASE_STORAGE_BUCKET'),
+  );
 }
 
 /// Turns on Firebase App Check so the server can tell the real app from a script. Debug builds use the debug
